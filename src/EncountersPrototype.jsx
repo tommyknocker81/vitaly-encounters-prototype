@@ -4,7 +4,7 @@ import {
   CheckCircle2, MinusCircle, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronsLeft,
   AlertTriangle, AlertCircle, ArrowUpDown, Filter, ArrowDown, CalendarDays, Stethoscope,
   ClipboardList, Users, Repeat, CornerDownRight, LayoutGrid, Bell, List, UserPlus,
-  FileText, BarChart3, History, User, Check,
+  FileText, BarChart3, History, User, Check, ExternalLink,
 } from "lucide-react";
 
 // Vitaly RSO design tokens (Figma: OpenLine-Vitaly)
@@ -91,6 +91,76 @@ const SOURCE_CONFIG = [
   },
 ];
 
+// Mock clinical detail data shown when an encounter card is expanded.
+// Multi-source merges (e.g. "Maastricht UMC+ (+1)") get one detail block per
+// contributing organization; conflicting values get a hover comparison.
+const ENCOUNTER_DETAILS = {
+  m1: [
+    {
+      org: "MAASTRICHT UMC+",
+      date: "16/08/2025",
+      problem: "Suspected wrist fracture",
+      vitals: "BP 140/85, weight 81 kg",
+      vitalsConflict: [
+        { org: "Maastricht UMC+", value: "140/85" },
+        { org: "Tergooi", value: "130/85" },
+      ],
+      outcome: "Cast applied, follow-up in 3 weeks",
+      additional1: "Patient reports fall during sports activity",
+      additional2: "X-ray confirms non-displaced fracture",
+      careProvider: "Dr. R. Verhoeven (Emergency Medicine)",
+      status: "ARRIVED",
+    },
+    {
+      org: "TERGOOI",
+      date: "16/08/2025",
+      problem: "Suspected wrist fracture",
+      vitals: "BP 130/85, weight 81 kg",
+      vitalsConflict: [
+        { org: "Maastricht UMC+", value: "140/85" },
+        { org: "Tergooi", value: "130/85" },
+      ],
+      outcome: "/",
+      additional1: "/",
+      additional2: "/",
+      careProvider: "/",
+      status: "ARRIVED",
+    },
+  ],
+  e1: [
+    {
+      org: "GP PRACTICE DE LINDE, AMERSFOORT",
+      date: "22/08/2025",
+      problem: "Hypertension monitoring",
+      vitals: "BP 138/86, weight 79 kg",
+      outcome: "No changes in meds, follow-up in 3 weeks",
+      additional1: "Patient adherent to medication",
+      additional2: "Lifestyle advice reinforced",
+      careProvider: "Dr. A. Dijkstra (General Practitioner)",
+      status: "ARRIVED",
+    },
+  ],
+};
+
+// Fallback for encounters without hand-authored detail data above.
+function genericDetail(item) {
+  const parts = item.label.split("|").map((s) => s.trim());
+  const org = item.source.replace(/\s*\(\+\d+\)\s*$/, "");
+  return [
+    {
+      org: org.toUpperCase(),
+      date: item.date.split(" - ")[0],
+      problem: parts[1] || parts[0],
+      vitals: null,
+      outcome: "No changes, follow-up as scheduled",
+      additional1: "—",
+      additional2: "—",
+      careProvider: "Dr. A. Dijkstra (General Practitioner)",
+      status: "ARRIVED",
+    },
+  ];
+}
+
 function formatClock(d) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -166,6 +236,105 @@ function CategoryTick({ done }) {
   );
 }
 
+// Renders "Maastricht UMC+ (+1)" with the "(+1)" count in bold primary,
+// signalling that this card merges records from more than one organization.
+function SourceLabel({ source }) {
+  const match = source.match(/^(.*?)\s*(\(\+\d+\))$/);
+  if (!match) return <span>{source}</span>;
+  return (
+    <span>
+      {match[1]} <span className="font-bold" style={{ color: T.primary }}>{match[2]}</span>
+    </span>
+  );
+}
+
+// Hover comparison shown on a vital-sign value that disagrees across the
+// organizations contributing to a merged encounter.
+function VitalsWarning({ comparisons }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span
+      className="relative inline-flex items-center cursor-help"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      <AlertCircle size={16} style={{ color: T.warning, fill: T.warning, stroke: "#fff" }} />
+      <AnimatePresence>
+        {show && (
+          <motion.div
+            initial={{ opacity: 0, y: 4, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.96 }}
+            transition={{ duration: 0.15 }}
+            className="absolute z-10 left-1/2 -translate-x-1/2 top-full mt-2 px-3 py-2 rounded-md text-white text-[13px] whitespace-nowrap shadow-lg"
+            style={{ backgroundColor: T.secondary }}
+          >
+            {comparisons.map((c, i) => (
+              <div key={i}>{c.org}: {c.value}</div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </span>
+  );
+}
+
+function DetailRow({ label, children }) {
+  if (children === null || children === undefined) return null;
+  return (
+    <div className="flex items-start gap-4 py-1 text-[13px]">
+      <span className="w-[120px] shrink-0" style={{ color: T.gray600 }}>{label}</span>
+      <span className="flex items-center gap-1.5 flex-wrap" style={{ color: T.bodyText }}>{children}</span>
+    </div>
+  );
+}
+
+function StatusBadge({ children }) {
+  return (
+    <span
+      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wide"
+      style={{ backgroundColor: "#E4F0E0", color: T.success }}
+    >
+      {children}
+    </span>
+  );
+}
+
+// One organization's contribution to an (expanded) encounter card. Merged
+// encounters render one of these per contributing source.
+function OrgDetailBlock({ detail, isFirst }) {
+  return (
+    <div className={`px-4 py-3 ${isFirst ? "" : "border-t border-white"}`} style={{ backgroundColor: T.light }}>
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className="text-[12px] font-bold tracking-wide" style={{ color: T.bodyText }}>{detail.org}</span>
+        <span className="text-[13px]" style={{ color: T.gray600 }}>{detail.date}</span>
+      </div>
+      <DetailRow label="Problem">
+        {detail.problem}
+        {detail.problem && <ExternalLink size={13} style={{ color: T.primary }} />}
+      </DetailRow>
+      <DetailRow label="Vital signs">
+        {detail.vitals && (
+          <>
+            {detail.vitals}
+            <ExternalLink size={13} style={{ color: T.primary }} />
+            {detail.vitalsConflict && <VitalsWarning comparisons={detail.vitalsConflict} />}
+          </>
+        )}
+      </DetailRow>
+      <div className="my-2 border-t" style={{ borderColor: T.border }} />
+      <DetailRow label="Outcome">{detail.outcome}</DetailRow>
+      <DetailRow label="Additional info">{detail.additional1}</DetailRow>
+      <DetailRow label="Additional info">{detail.additional2}</DetailRow>
+      <DetailRow label="Care provider">{detail.careProvider}</DetailRow>
+      <div className="flex items-start gap-4 py-1 text-[13px]">
+        <span className="w-[120px] shrink-0" style={{ color: T.gray600 }}>Status</span>
+        <StatusBadge>{detail.status}</StatusBadge>
+      </div>
+    </div>
+  );
+}
+
 function EncountersSection({ scrollRef }) {
   const [runId, setRunId] = useState(0);
   const [sourceStatus, setSourceStatus] = useState({});
@@ -175,6 +344,8 @@ function EncountersSection({ scrollRef }) {
   const [lastUpdated, setLastUpdated] = useState(null);
   // Simulated load state of the other categories (not wired to real data).
   const [categoryDone, setCategoryDone] = useState({ klachten: false, treatment: false });
+  const [expandedIds, setExpandedIds] = useState({});
+  const toggleExpand = (id) => setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const allItemsRef = useRef([]);
   const timeoutsRef = useRef([]);
@@ -238,6 +409,7 @@ function EncountersSection({ scrollRef }) {
     userScrolledRef.current = false;
     queuePendingRef.current = false;
     fetchedRef.current = {};
+    setExpandedIds({});
     setSourceStatus(Object.fromEntries(SOURCE_CONFIG.map((s) => [s.id, { state: "loading" }])));
     SOURCE_CONFIG.forEach(runSource);
     // Mock loads for the other categories, so the whole menu comes alive.
@@ -485,27 +657,59 @@ function EncountersSection({ scrollRef }) {
                 Loading first results…
               </motion.div>
             )}
-            {visibleItems.map((item) => (
-              <motion.div
-                key={item.id}
-                layout
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
-                transition={{ ...cardSpring, opacity: { duration: 0.25 } }}
-                className="border rounded-md px-4 py-3 bg-white"
-                style={{ borderColor: T.border }}
-              >
-                <div className="flex items-center justify-between text-[13px] mb-1" style={{ color: T.gray600 }}>
-                  <span>{item.date}</span>
-                  <span>{item.source}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[14px] font-semibold" style={{ color: T.primary }}>{item.label}</span>
-                  <ChevronDown size={16} style={{ color: T.primary }} />
-                </div>
-              </motion.div>
-            ))}
+            {visibleItems.map((item) => {
+              const isExpanded = !!expandedIds[item.id];
+              const details = ENCOUNTER_DETAILS[item.id] || genericDetail(item);
+              return (
+                <motion.div
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
+                  transition={{ ...cardSpring, opacity: { duration: 0.25 } }}
+                  className="border rounded-md bg-white overflow-hidden"
+                  style={{ borderColor: T.border }}
+                >
+                  <button
+                    onClick={() => toggleExpand(item.id)}
+                    className="w-full text-left px-4 py-3 hover:bg-black/[0.02]"
+                  >
+                    <div className="flex items-center justify-between text-[13px] mb-1" style={{ color: T.gray600 }}>
+                      <span>{item.date}</span>
+                      <span><SourceLabel source={item.source} /></span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[14px] font-semibold" style={{ color: T.primary }}>{item.label}</span>
+                      <motion.span
+                        animate={{ rotate: isExpanded ? 180 : 0 }}
+                        transition={{ duration: 0.2, ease: "easeInOut" }}
+                        className="shrink-0"
+                      >
+                        <ChevronDown size={16} style={{ color: T.primary }} />
+                      </motion.span>
+                    </div>
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {isExpanded && (
+                      <motion.div
+                        key="detail"
+                        className="overflow-hidden border-t"
+                        style={{ borderColor: T.border }}
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: "easeInOut" }}
+                      >
+                        {details.map((d, i) => (
+                          <OrgDetailBlock key={i} detail={d} isFirst={i === 0} />
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
         </div>
 
