@@ -177,6 +177,48 @@ function encounterTypeKey(item) {
   return FILTER_TYPES.find((t) => t.test(prefix))?.key ?? null;
 }
 
+// Which SOURCE_CONFIG source contributed a given item — used by the
+// "All organisations" global filter (looked up rather than stored on the
+// item, so the merge-on-arrival data shape doesn't need to change).
+function sourceIdForItem(item) {
+  return SOURCE_CONFIG.find((s) => s.entries.some((e) => e.id === item.id))?.id;
+}
+
+const TIME_OPTIONS = [
+  { key: "all", label: "All time" },
+  { key: "month", label: "Last month" },
+  { key: "6months", label: "Last 6 months" },
+  { key: "year", label: "Last year" },
+  { key: "5years", label: "Last 5 years" },
+];
+
+function withinTimeWindow(item, timeFilter) {
+  if (timeFilter === "all") return true;
+  const days = { month: 31, "6months": 186, year: 366, "5years": 366 * 5 }[timeFilter];
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  return new Date(item.sortDate) >= cutoff;
+}
+
+function orgFilterLabel(selected) {
+  if (selected.size === SOURCE_CONFIG.length) return "All organisations";
+  if (selected.size === 0) return "No organisations";
+  if (selected.size <= 2) return SOURCE_CONFIG.filter((s) => selected.has(s.id)).map((s) => s.name).join(", ");
+  return `${selected.size} organisations selected`;
+}
+
+// Shared close-on-outside-click behavior for the header dropdowns.
+function useClickOutside(ref, onOutside, active) {
+  useEffect(() => {
+    if (!active) return;
+    const onClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onOutside();
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [active, ref, onOutside]);
+}
+
 function formatClock(d) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
@@ -399,7 +441,7 @@ function FilterAccordion({ title, open, onToggle, children }) {
   );
 }
 
-function EncountersSection({ scrollRef }) {
+function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
   const [runId, setRunId] = useState(0);
   const [sourceStatus, setSourceStatus] = useState({});
   const [visibleItems, setVisibleItems] = useState([]);
@@ -592,9 +634,12 @@ function EncountersSection({ scrollRef }) {
     (careProviderQuery.trim() ? 1 : 0);
 
   // Filters are a pure view over whatever has already merged in — they never
-  // change what's fetched, only what's shown.
+  // change what's fetched, only what's shown. Source/time come from the
+  // page-level "All organisations" / "All time" dropdowns.
   const passesFilters = (item) => {
     if (!statusFilters.arrived) return false; // every entry here is "arrived" (this is the Past tab)
+    if (sourceFilter && !sourceFilter.has(sourceIdForItem(item))) return false;
+    if (!withinTimeWindow(item, timeFilter)) return false;
     if (typeFilters.size > 0) {
       const key = encounterTypeKey(item);
       if (!key || !typeFilters.has(key)) return false;
@@ -1135,17 +1180,108 @@ function PatientBar({ activeTab, onTabChange }) {
   );
 }
 
-function FilterSelect({ placeholder }) {
+// "All organisations" — multi-select checkbox dropdown, global to the page.
+function OrgFilterDropdown({ selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false), open);
+
+  const toggle = (id) => {
+    onChange((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   return (
-    <button className="w-60 flex items-center justify-between border rounded px-3 py-2 text-[14px] bg-white" style={{ borderColor: T.gray400, color: T.gray600 }}>
-      {placeholder} <ChevronDown size={15} style={{ color: T.primary }} />
-    </button>
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-60 flex items-center justify-between border rounded px-3 py-2 text-[14px] bg-white text-left"
+        style={{ borderColor: T.gray400, color: T.gray600 }}
+      >
+        <span className="truncate">{orgFilterLabel(selected)}</span>
+        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }} className="shrink-0">
+          <ChevronDown size={15} style={{ color: T.primary }} />
+        </motion.span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute left-0 top-full mt-2 w-72 rounded-md border bg-white shadow-lg p-3 z-20"
+            style={{ borderColor: T.border }}
+          >
+            {SOURCE_CONFIG.map((s) => (
+              <FilterCheckbox key={s.id} label={s.name} checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// "All time" — single-select dropdown, global to the page.
+function TimeFilterDropdown({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useClickOutside(ref, () => setOpen(false), open);
+  const label = TIME_OPTIONS.find((o) => o.key === value)?.label ?? "All time";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-60 flex items-center justify-between border rounded px-3 py-2 text-[14px] bg-white"
+        style={{ borderColor: T.gray400, color: T.gray600 }}
+      >
+        {label}
+        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2 }}>
+          <ChevronDown size={15} style={{ color: T.primary }} />
+        </motion.span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute left-0 top-full mt-2 w-60 rounded-md border bg-white shadow-lg overflow-hidden z-20"
+            style={{ borderColor: T.border }}
+          >
+            {TIME_OPTIONS.map((o) => (
+              <button
+                key={o.key}
+                onClick={() => {
+                  onChange(o.key);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-4 py-2.5 text-[14px]"
+                style={{ color: T.bodyText, backgroundColor: value === o.key ? T.lightBg : "#fff" }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
 export default function VitalyPatient360() {
   const [activeTab, setActiveTab] = useState("PATIENT 360");
   const contentScrollRef = useRef(null);
+  // Global filters, applied across whichever section is showing — currently
+  // only Encounters reads them, but they live at the page level on purpose.
+  const [sourceFilter, setSourceFilter] = useState(() => new Set(SOURCE_CONFIG.map((s) => s.id)));
+  const [timeFilter, setTimeFilter] = useState("all");
 
   return (
     <div className="flex h-screen bg-white overflow-hidden" style={{ fontFamily: T.fontFamily, color: T.bodyText }}>
@@ -1185,11 +1321,11 @@ export default function VitalyPatient360() {
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-[22px] font-semibold" style={{ color: T.bodyText }}>Patient 360</h2>
                     <div className="flex items-center gap-4">
-                      <FilterSelect placeholder="All organisations" />
-                      <FilterSelect placeholder="All time" />
+                      <OrgFilterDropdown selected={sourceFilter} onChange={setSourceFilter} />
+                      <TimeFilterDropdown value={timeFilter} onChange={setTimeFilter} />
                     </div>
                   </div>
-                  <EncountersSection scrollRef={contentScrollRef} />
+                  <EncountersSection scrollRef={contentScrollRef} sourceFilter={sourceFilter} timeFilter={timeFilter} />
                 </>
               ) : (
                 <div className="border rounded-md py-16 text-center text-sm" style={{ borderColor: T.border, color: T.gray500 }}>
