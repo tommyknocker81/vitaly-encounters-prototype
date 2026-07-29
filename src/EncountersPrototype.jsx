@@ -4,7 +4,7 @@ import {
   CheckCircle2, MinusCircle, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronsLeft,
   AlertTriangle, AlertCircle, ArrowUpDown, Filter, ArrowDown, CalendarDays, Stethoscope,
   ClipboardList, Users, Repeat, CornerDownRight, LayoutGrid, Bell, List, UserPlus,
-  FileText, BarChart3, History, User,
+  FileText, BarChart3, History, User, Check,
 } from "lucide-react";
 
 // Vitaly RSO design tokens (Figma: OpenLine-Vitaly)
@@ -144,6 +144,28 @@ function FadeSwap({ id, className, children }) {
   );
 }
 
+// Small loading→check indicator for the category menu rows.
+function CategoryTick({ done }) {
+  return (
+    <span className="relative block w-[16px] h-[16px] shrink-0">
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={done ? "done" : "loading"}
+          className="absolute inset-0 flex items-center justify-center"
+          initial={{ opacity: 0, scale: 0.3 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.3 }}
+          transition={iconSpring}
+        >
+          {done
+            ? <Check size={15} strokeWidth={3} style={{ color: T.success }} />
+            : <span className="block w-[13px] h-[13px] border-2 border-[#CED4DA] border-t-[#0080A3] rounded-full animate-spin" />}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 function EncountersSection({ scrollRef }) {
   const [runId, setRunId] = useState(0);
   const [sourceStatus, setSourceStatus] = useState({});
@@ -151,6 +173,8 @@ function EncountersSection({ scrollRef }) {
   const [queuedItems, setQueuedItems] = useState(null);
   const [sourcesOpen, setSourcesOpen] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
+  // Simulated load state of the other categories (not wired to real data).
+  const [categoryDone, setCategoryDone] = useState({ klachten: false, treatment: false });
 
   const allItemsRef = useRef([]);
   const timeoutsRef = useRef([]);
@@ -216,6 +240,10 @@ function EncountersSection({ scrollRef }) {
     fetchedRef.current = {};
     setSourceStatus(Object.fromEntries(SOURCE_CONFIG.map((s) => [s.id, { state: "loading" }])));
     SOURCE_CONFIG.forEach(runSource);
+    // Mock loads for the other categories, so the whole menu comes alive.
+    setCategoryDone({ klachten: false, treatment: false });
+    timeoutsRef.current.push(setTimeout(() => setCategoryDone((p) => ({ ...p, treatment: true })), 4000 + Math.random() * 3000));
+    timeoutsRef.current.push(setTimeout(() => setCategoryDone((p) => ({ ...p, klachten: true })), 8000 + Math.random() * 4000));
   }, [runSource]);
 
   useEffect(() => {
@@ -269,14 +297,36 @@ function EncountersSection({ scrollRef }) {
   return (
     <div className="grid grid-cols-[300px_1fr] gap-10">
       <div className="flex flex-col self-start sticky top-6">
-        <div className="text-white font-semibold text-sm tracking-wide px-4 py-3.5 flex items-center gap-2.5 rounded-t-sm" style={{ backgroundColor: T.primary }}>
-          <CalendarDays size={16} /> ENCOUNTERS
+        <div className="text-white font-semibold text-sm tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5 rounded-t-sm" style={{ backgroundColor: T.primary }}>
+          <span className="flex items-center gap-2.5"><CalendarDays size={16} /> ENCOUNTERS</span>
+          {/* Live per-category indicator: counts up per settled source, then
+              resolves to a check (or warning when a source failed). */}
+          <span className="relative block w-[32px] h-[18px] shrink-0">
+            <AnimatePresence initial={false}>
+              <motion.span
+                key={!allSettled ? `n${loadedCount}` : failedCount > 0 ? "warn" : "done"}
+                className="absolute inset-0 flex items-center justify-end"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18 }}
+              >
+                {!allSettled
+                  ? <span className="text-[13px] font-semibold tabular-nums">{loadedCount}/{SOURCE_CONFIG.length}</span>
+                  : failedCount > 0
+                    ? <AlertTriangle size={14} style={{ color: T.warning }} />
+                    : <Check size={15} strokeWidth={3} />}
+              </motion.span>
+            </AnimatePresence>
+          </span>
         </div>
-        <div className="border border-t-0 border-[#DEE2E6] text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center gap-2.5" style={{ color: T.bodyText }}>
-          <Stethoscope size={16} style={{ color: T.primary }} /> KLACHTEN EN DIAGNOSES
+        <div className="border border-t-0 border-[#DEE2E6] bg-white text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5" style={{ color: T.bodyText }}>
+          <span className="flex items-center gap-2.5"><Stethoscope size={16} style={{ color: T.primary }} /> KLACHTEN EN DIAGNOSES</span>
+          <CategoryTick done={categoryDone.klachten} />
         </div>
-        <div className="border border-t-0 border-[#DEE2E6] text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center gap-2.5" style={{ color: T.bodyText }}>
-          <ClipboardList size={16} style={{ color: T.primary }} /> TREATMENT RESTRICTIONS
+        <div className="border border-t-0 border-[#DEE2E6] bg-white text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5" style={{ color: T.bodyText }}>
+          <span className="flex items-center gap-2.5"><ClipboardList size={16} style={{ color: T.primary }} /> TREATMENT RESTRICTIONS</span>
+          <CategoryTick done={categoryDone.treatment} />
         </div>
       </div>
 
