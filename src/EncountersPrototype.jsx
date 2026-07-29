@@ -1154,14 +1154,14 @@ function PatientBar({ activeTab, onTabChange }) {
           <div className="text-[13px]" style={{ color: T.gray600 }}>16.08.2024(16yrs) · Male</div>
         </div>
       </div>
-      <div className="flex-1 flex items-end justify-end gap-10 px-10">
+      <div className="flex-1 flex items-stretch justify-end gap-10 px-10">
         {TABS.map((tab) => {
           const active = tab === activeTab;
           return (
             <button
               key={tab}
               onClick={() => onTabChange(tab)}
-              className={`relative pb-3 pt-4 text-[13px] tracking-wide ${active ? "font-bold" : "font-normal"}`}
+              className={`relative flex items-center text-[13px] tracking-wide ${active ? "font-bold" : "font-normal"}`}
               style={{ color: active ? T.primary : T.gray700 }}
             >
               {tab}
