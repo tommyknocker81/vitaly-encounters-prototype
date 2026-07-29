@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckCircle2, MinusCircle, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronsLeft,
   AlertTriangle, AlertCircle, ArrowUpDown, Filter, ArrowDown, CalendarDays, Stethoscope,
   ClipboardList, Users, Repeat, CornerDownRight, LayoutGrid, Bell, List, UserPlus,
-  FileText, BarChart3, History, User, Check, ExternalLink,
+  FileText, BarChart3, History, User, Check, ExternalLink, Plus, X, Search,
 } from "lucide-react";
 
 // Vitaly RSO design tokens (Figma: OpenLine-Vitaly)
@@ -159,6 +160,21 @@ function genericDetail(item) {
       status: "ARRIVED",
     },
   ];
+}
+
+// Encounter-type checkboxes offered in the filter drawer, and how they map
+// onto the "Type | Detail" label prefix each mock entry already has.
+const FILTER_TYPES = [
+  { key: "outpatient", label: "Outpatient visits", test: (p) => p.startsWith("Outpatient visit") },
+  { key: "emergency", label: "Emergency", test: (p) => p.startsWith("Emergency") },
+  { key: "day-treatment", label: "Day treatment", test: (p) => p.startsWith("Day treatment") },
+  { key: "therapy", label: "Therapy session", test: (p) => p.startsWith("Therapy session") },
+  { key: "teleconsult", label: "Teleconsult", test: (p) => p.startsWith("Teleconsult") },
+];
+
+function encounterTypeKey(item) {
+  const prefix = item.label.split("|")[0].trim();
+  return FILTER_TYPES.find((t) => t.test(prefix))?.key ?? null;
 }
 
 function formatClock(d) {
@@ -335,6 +351,54 @@ function OrgDetailBlock({ detail, isFirst }) {
   );
 }
 
+function FilterCheckbox({ label, checked, onChange }) {
+  return (
+    <button onClick={onChange} className="w-full flex items-center gap-2.5 py-1.5 text-[14px] text-left">
+      <span
+        className="w-[18px] h-[18px] rounded flex items-center justify-center shrink-0 border-2 transition-colors"
+        style={{ backgroundColor: checked ? T.primary : "#fff", borderColor: checked ? T.primary : T.gray400 }}
+      >
+        <AnimatePresence>
+          {checked && (
+            <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={iconSpring}>
+              <Check size={13} strokeWidth={3} className="text-white" />
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </span>
+      <span style={{ color: T.bodyText }}>{label}</span>
+    </button>
+  );
+}
+
+// Collapsible section of the filter drawer ("Status", "Encounter type", …),
+// plus icon rotating into an x when expanded.
+function FilterAccordion({ title, open, onToggle, children }) {
+  return (
+    <div className="border-b" style={{ borderColor: T.border }}>
+      <button onClick={onToggle} className="w-full flex items-center justify-between px-5 py-3.5 text-[14px]" style={{ color: T.bodyText }}>
+        {title}
+        <motion.span animate={{ rotate: open ? 45 : 0 }} transition={{ duration: 0.2, ease: "easeInOut" }}>
+          <Plus size={16} style={{ color: T.gray600 }} />
+        </motion.span>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            className="overflow-hidden"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+          >
+            <div className="px-5 pb-4 pt-1" style={{ backgroundColor: T.lightBg }}>{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function EncountersSection({ scrollRef }) {
   const [runId, setRunId] = useState(0);
   const [sourceStatus, setSourceStatus] = useState({});
@@ -346,6 +410,21 @@ function EncountersSection({ scrollRef }) {
   const [categoryDone, setCategoryDone] = useState({ klachten: false, treatment: false });
   const [expandedIds, setExpandedIds] = useState({});
   const toggleExpand = (id) => setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
+
+  // Sort order: a display preference, re-applied to whatever is already
+  // merged rather than re-running the simulation.
+  const [sortOrder, setSortOrder] = useState("newest");
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortOrderRef = useRef("newest");
+  const sortMenuRef = useRef(null);
+
+  // Filter drawer state — purely a view over whatever has already arrived;
+  // it never touches the merge-on-arrival or pagination logic.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [typeFilters, setTypeFilters] = useState(new Set());
+  const [statusFilters, setStatusFilters] = useState({ arrived: true, planned: true });
+  const [careProviderQuery, setCareProviderQuery] = useState("");
+  const [drawerSections, setDrawerSections] = useState({ status: false, encounterType: true, careProvider: false });
 
   const allItemsRef = useRef([]);
   const timeoutsRef = useRef([]);
@@ -362,6 +441,23 @@ function EncountersSection({ scrollRef }) {
   // Only sources that actually responded count as loaded (empty = responded, no records)
   const loadedCount = statuses.filter((s) => s.state === "loaded" || s.state === "empty").length;
   const allSettled = statuses.length > 0 && pendingCount === 0;
+
+  const applySort = useCallback((list, order) => {
+    const o = order || sortOrderRef.current;
+    return [...list].sort((a, b) =>
+      o === "oldest" ? new Date(a.sortDate) - new Date(b.sortDate) : new Date(b.sortDate) - new Date(a.sortDate)
+    );
+  }, []);
+
+  // Sort is a display preference: re-sort whatever has already arrived
+  // rather than touching the merge-on-arrival state machine.
+  const changeSortOrder = (order) => {
+    sortOrderRef.current = order;
+    setSortOrder(order);
+    setVisibleItems((prev) => applySort(prev, order));
+    setQueuedItems((prev) => (prev ? applySort(prev, order) : prev));
+    setSortMenuOpen(false);
+  };
 
   // phase: "initial" for the first fetch, "more" for pagination fetches
   // triggered by Show more. Each fetch returns the next FETCH_PAGE entries.
@@ -382,7 +478,7 @@ function EncountersSection({ scrollRef }) {
 
       if (slice.length) {
         allItemsRef.current = [...allItemsRef.current, ...slice];
-        const sorted = [...allItemsRef.current].sort((a, b) => new Date(b.sortDate) - new Date(a.sortDate));
+        const sorted = applySort(allItemsRef.current);
         // Everything fetched is displayed. Arrivals are deferred behind the
         // banner only while the user has scrolled into the page — except
         // records the user explicitly requested via Show more ("more" phase),
@@ -458,6 +554,61 @@ function EncountersSection({ scrollRef }) {
     return () => el.removeEventListener("scroll", onScroll);
   }, [scrollRef]);
 
+  useEffect(() => {
+    if (!sortMenuOpen) return;
+    const onClick = (e) => {
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target)) setSortMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [sortMenuOpen]);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setFiltersOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [filtersOpen]);
+
+  const toggleType = (key) => {
+    setTypeFilters((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setTypeFilters(new Set());
+    setStatusFilters({ arrived: true, planned: true });
+    setCareProviderQuery("");
+  };
+
+  const activeFilterCount =
+    typeFilters.size +
+    (!statusFilters.arrived || !statusFilters.planned ? 1 : 0) +
+    (careProviderQuery.trim() ? 1 : 0);
+
+  // Filters are a pure view over whatever has already merged in — they never
+  // change what's fetched, only what's shown.
+  const passesFilters = (item) => {
+    if (!statusFilters.arrived) return false; // every entry here is "arrived" (this is the Past tab)
+    if (typeFilters.size > 0) {
+      const key = encounterTypeKey(item);
+      if (!key || !typeFilters.has(key)) return false;
+    }
+    if (careProviderQuery.trim()) {
+      const q = careProviderQuery.trim().toLowerCase();
+      const details = ENCOUNTER_DETAILS[item.id] || genericDetail(item);
+      if (!details.some((d) => d.careProvider && d.careProvider.toLowerCase().includes(q))) return false;
+    }
+    return true;
+  };
+
+  const displayedItems = visibleItems.filter(passesFilters);
+
   // Records known to exist on the server but not yet fetched (e.g. Maastricht
   // reported total 16 and delivered 10). This is what "Show more" loads —
   // it's hidden entirely once the picture is complete.
@@ -467,6 +618,7 @@ function EncountersSection({ scrollRef }) {
   }, 0);
 
   return (
+    <>
     <div className="grid grid-cols-[300px_1fr] gap-10">
       <div className="flex flex-col self-start sticky top-6">
         <div className="text-white font-semibold text-sm tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5 rounded-t-sm" style={{ backgroundColor: T.primary }}>
@@ -616,8 +768,52 @@ function EncountersSection({ scrollRef }) {
             <span className="text-sm px-3 py-1" style={{ color: T.gray600 }}>Planned (0)</span>
           </div>
           <div className="flex items-center gap-4 text-sm" style={{ color: T.primary }}>
-            <span className="flex items-center gap-1"><ArrowUpDown size={14} /> Sort: Newest first</span>
-            <span className="flex items-center gap-1"><Filter size={14} /> Filters</span>
+            <div className="relative" ref={sortMenuRef}>
+              <button onClick={() => setSortMenuOpen((v) => !v)} className="flex items-center gap-1">
+                <ArrowUpDown size={14} /> Sort: {sortOrder === "oldest" ? "Oldest first" : "Newest first"}
+              </button>
+              <AnimatePresence>
+                {sortMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute left-0 top-full mt-2 w-44 rounded-md border bg-white shadow-lg overflow-hidden z-20"
+                    style={{ borderColor: T.border }}
+                  >
+                    {["newest", "oldest"].map((o) => (
+                      <button
+                        key={o}
+                        onClick={() => changeSortOrder(o)}
+                        className="w-full text-left px-4 py-2.5 text-[14px]"
+                        style={{ color: T.bodyText, backgroundColor: sortOrder === o ? T.light : "#fff" }}
+                      >
+                        {o === "oldest" ? "Oldest first" : "Newest first"}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <button onClick={() => setFiltersOpen(true)} className="flex items-center gap-1.5">
+              <Filter size={14} /> Filters
+              <AnimatePresence>
+                {activeFilterCount > 0 && (
+                  <motion.span
+                    key="badge"
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0, opacity: 0 }}
+                    transition={iconSpring}
+                    className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full text-white text-[11px] font-bold"
+                    style={{ backgroundColor: T.primary }}
+                  >
+                    {activeFilterCount}
+                  </motion.span>
+                )}
+              </AnimatePresence>
+            </button>
           </div>
         </div>
 
@@ -657,7 +853,22 @@ function EncountersSection({ scrollRef }) {
                 Loading first results…
               </motion.div>
             )}
-            {visibleItems.map((item) => {
+            {visibleItems.length > 0 && displayedItems.length === 0 && (
+              <motion.div
+                key="filtered-empty"
+                className="text-sm py-6 text-center border rounded-md"
+                style={{ color: T.gray500, borderColor: T.border }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0, transition: { duration: 0.12 } }}
+              >
+                No encounters match the selected filters.{" "}
+                <button onClick={clearFilters} className="underline font-semibold" style={{ color: T.primary }}>
+                  Clear filters
+                </button>
+              </motion.div>
+            )}
+            {displayedItems.map((item) => {
               const isExpanded = !!expandedIds[item.id];
               const details = ENCOUNTER_DETAILS[item.id] || genericDetail(item);
               return (
@@ -738,6 +949,95 @@ function EncountersSection({ scrollRef }) {
         </AnimatePresence>
       </div>
     </div>
+
+    {typeof document !== "undefined" && createPortal(
+      <AnimatePresence>
+        {filtersOpen && (
+          <>
+            <motion.div
+              key="filters-backdrop"
+              className="fixed inset-0 bg-black/30 z-40"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setFiltersOpen(false)}
+            />
+            <motion.div
+              key="filters-drawer"
+              className="fixed top-0 right-0 h-full w-[400px] max-w-[90vw] bg-white z-50 shadow-2xl flex flex-col"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 380, damping: 38 }}
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: T.border }}>
+                <span className="text-[13px] font-bold tracking-wide" style={{ color: T.bodyText }}>FILTERS</span>
+                <button onClick={() => setFiltersOpen(false)} aria-label="Close filters">
+                  <X size={20} style={{ color: T.primary }} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                <FilterAccordion
+                  title="Status"
+                  open={drawerSections.status}
+                  onToggle={() => setDrawerSections((p) => ({ ...p, status: !p.status }))}
+                >
+                  <FilterCheckbox
+                    label="Arrived"
+                    checked={statusFilters.arrived}
+                    onChange={() => setStatusFilters((p) => ({ ...p, arrived: !p.arrived }))}
+                  />
+                  <FilterCheckbox
+                    label="Planned"
+                    checked={statusFilters.planned}
+                    onChange={() => setStatusFilters((p) => ({ ...p, planned: !p.planned }))}
+                  />
+                </FilterAccordion>
+
+                <FilterAccordion
+                  title="Encounter type"
+                  open={drawerSections.encounterType}
+                  onToggle={() => setDrawerSections((p) => ({ ...p, encounterType: !p.encounterType }))}
+                >
+                  {FILTER_TYPES.map((t) => (
+                    <FilterCheckbox key={t.key} label={t.label} checked={typeFilters.has(t.key)} onChange={() => toggleType(t.key)} />
+                  ))}
+                </FilterAccordion>
+
+                <FilterAccordion
+                  title="Care provider"
+                  open={drawerSections.careProvider}
+                  onToggle={() => setDrawerSections((p) => ({ ...p, careProvider: !p.careProvider }))}
+                >
+                  <div className="relative">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: T.gray500 }} />
+                    <input
+                      value={careProviderQuery}
+                      onChange={(e) => setCareProviderQuery(e.target.value)}
+                      placeholder="Search care provider"
+                      className="w-full pl-8 pr-3 py-2 text-[14px] rounded border bg-white outline-none"
+                      style={{ borderColor: T.gray400, color: T.bodyText }}
+                    />
+                  </div>
+                </FilterAccordion>
+              </div>
+
+              {activeFilterCount > 0 && (
+                <div className="px-5 py-3 border-t shrink-0" style={{ borderColor: T.border }}>
+                  <button onClick={clearFilters} className="text-[14px] font-semibold" style={{ color: T.primary }}>
+                    Clear all filters
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>,
+      document.body
+    )}
+    </>
   );
 }
 
