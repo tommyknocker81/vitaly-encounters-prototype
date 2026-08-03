@@ -71,7 +71,12 @@ const SOURCE_CONFIG = [
     name: "UMC Utrecht",
     delayMs: () => 6000 + Math.random() * 2500,
     outcome: "failed",
-    entries: [],
+    // The first fetch always fails; a manual retry (via the source row's
+    // retry button) succeeds and delivers this source's records.
+    retryOutcome: "loaded",
+    entries: [
+      { id: "u1", date: "05/09/2024", sortDate: "2024-09-05", label: "Outpatient visit | Rheumatology consultation", source: "UMC Utrecht" },
+    ],
   },
   {
     id: "mumc",
@@ -508,7 +513,8 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
     setSourceStatus((prev) => ({ ...prev, [source.id]: { ...prev[source.id], state: "loading", phase } }));
     const t = setTimeout(() => {
       const now = new Date();
-      const state = source.outcome === "empty" ? "empty" : source.outcome === "failed" ? "failed" : "loaded";
+      const outcome = opts.outcomeOverride || source.outcome;
+      const state = outcome === "empty" ? "empty" : outcome === "failed" ? "failed" : "loaded";
       const already = fetchedRef.current[source.id] || 0;
       const slice = state === "loaded" ? source.entries.slice(already, already + FETCH_PAGE) : [];
       if (state === "loaded") fetchedRef.current[source.id] = already + slice.length;
@@ -563,7 +569,9 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
 
   const retrySource = (id) => {
     const source = SOURCE_CONFIG.find((s) => s.id === id);
-    runSource(source, { delayMs: () => 2500 });
+    // Sources with a retryOutcome (e.g. UMC Utrecht) succeed on a manual
+    // retry even though their first fetch is scripted to fail.
+    runSource(source, { delayMs: () => 2500, outcomeOverride: source.retryOutcome });
   };
 
   // Ask every fully-responded source that still has server-side records for
