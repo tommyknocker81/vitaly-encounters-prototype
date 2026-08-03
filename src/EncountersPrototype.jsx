@@ -571,7 +571,7 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
     const source = SOURCE_CONFIG.find((s) => s.id === id);
     // Sources with a retryOutcome (e.g. UMC Utrecht) succeed on a manual
     // retry even though their first fetch is scripted to fail.
-    runSource(source, { delayMs: () => 2500, outcomeOverride: source.retryOutcome });
+    runSource(source, { delayMs: () => 10000, outcomeOverride: source.retryOutcome });
   };
 
   // Ask every fully-responded source that still has server-side records for
