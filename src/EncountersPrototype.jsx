@@ -481,6 +481,9 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
   const queuePendingRef = useRef(false);
   // How many entries each source has delivered so far (server-side cursor).
   const fetchedRef = useRef({});
+  // Whether any source has failed at some point during this run — used to
+  // auto-collapse the breakdown once a retry fixes the last failure.
+  const everFailedRef = useRef(false);
 
   const statuses = Object.values(sourceStatus);
   const pendingCount = statuses.filter((s) => s.state === "loading").length;
@@ -553,6 +556,8 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
     userScrolledRef.current = false;
     queuePendingRef.current = false;
     fetchedRef.current = {};
+    everFailedRef.current = false;
+    setSourcesOpen(true);
     setExpandedIds({});
     setSourceStatus(Object.fromEntries(SOURCE_CONFIG.map((s) => [s.id, { state: "loading" }])));
     SOURCE_CONFIG.forEach(runSource);
@@ -603,6 +608,21 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
   }, [scrollRef]);
+
+  // Remember that a failure happened at some point during this run.
+  useEffect(() => {
+    if (statuses.some((s) => s.state === "failed")) everFailedRef.current = true;
+  }, [sourceStatus]);
+
+  // Once a run that included a failure becomes fully successful (e.g. the
+  // user retried the failed source), auto-collapse the breakdown into its
+  // condensed summary line — a clean first-try run is left as-is.
+  useEffect(() => {
+    if (allSettled && failedCount === 0 && everFailedRef.current) {
+      everFailedRef.current = false;
+      timeoutsRef.current.push(setTimeout(() => setSourcesOpen(false), 1200));
+    }
+  }, [allSettled, failedCount]);
 
   useEffect(() => {
     if (!sortMenuOpen) return;
