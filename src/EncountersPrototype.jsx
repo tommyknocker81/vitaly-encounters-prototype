@@ -23,6 +23,7 @@ const T = {
   gray400: "#CED4DA",
   lightBg: "#E9ECEF",    // Theme/Light background (source rows)
   light: "#F7F8FA",      // Theme/Light
+  danger: "#DC5B5B",     // Treatment-restriction label color
   fontFamily: "'Source Sans 3', 'Source Sans Pro', system-ui, sans-serif",
 };
 
@@ -212,6 +213,117 @@ function orgFilterLabel(selected) {
   return `${selected.size} organisations selected`;
 }
 
+// Klachten en diagnoses / Treatment restrictions — the left rail's other two
+// categories. Static (not fetched page-by-page), but each entry deliberately
+// lines up by date/org with an item already in SOURCE_CONFIG above, so the
+// three categories read as one aggregated, cross-referenced patient picture
+// rather than unrelated filler content.
+const DIAGNOSIS_ENTRIES = [
+  {
+    id: "d1",
+    date: "22/08/2025",
+    sortDate: "2025-08-22",
+    source: "GP Practice de Linde, Amersfoort",
+    label: "Diagnosis | Essential hypertension",
+    detail: {
+      org: "GP Practice de Linde, Amersfoort",
+      explanation: "Essential (primary) hypertension, diagnosed following repeated elevated readings at routine checks.",
+      verificationStatus: "Confirmed",
+      status: "ACTIVE",
+      date: "22/08/2025",
+    },
+  },
+  {
+    id: "d2",
+    date: "12/11/2021",
+    sortDate: "2021-11-12",
+    source: "Maastricht UMC+",
+    label: "Diagnosis | Mild persistent asthma",
+    detail: {
+      org: "Maastricht UMC+",
+      explanation: "Mild persistent asthma, well controlled on inhaled therapy.",
+      location: "Lungs (bilateral)",
+      verificationStatus: "Confirmed",
+      status: "ACTIVE",
+      date: "12/11/2021",
+    },
+  },
+  {
+    id: "d3",
+    date: "22/11/2024",
+    sortDate: "2024-11-22",
+    source: "Maastricht UMC+",
+    label: "Diagnosis | Type 1 Diabetes Mellitus",
+    detail: {
+      org: "Maastricht UMC+",
+      explanation: "Type 1 diabetes mellitus, insulin-dependent, managed jointly with endocrinology.",
+      verificationStatus: "Confirmed",
+      status: "ACTIVE",
+      date: "22/11/2024",
+    },
+  },
+  {
+    id: "d4",
+    date: "16/08/2025",
+    sortDate: "2025-08-16",
+    source: "Maastricht UMC+",
+    label: "Complaint | Persistent right wrist pain post-fracture",
+    detail: {
+      org: "Maastricht UMC+",
+      explanation: "Persistent right wrist pain following the suspected fracture sustained during sports activity; monitored post-cast removal.",
+      location: "Wrist",
+      laterality: "Right",
+      verificationStatus: "Confirmed",
+      status: "COMPLETED",
+      date: "16/08/2025",
+    },
+  },
+];
+
+const RESTRICTION_ENTRIES = [
+  {
+    id: "r1",
+    date: "15/01/2022",
+    sortDate: "2022-01-15",
+    source: "GP Practice de Linde, Amersfoort",
+    label: "Medication restriction | Avoid NSAIDs",
+    detail: {
+      limits: "Flagged after mild bronchospasm following ibuprofen taken for post-diagnosis asthma-related pain",
+      verifiedBy: "Dr. A. Dijkstra (General Practitioner)",
+      verificationDate: "15/1/2022",
+    },
+  },
+  {
+    id: "r2",
+    date: "25/08/2025",
+    sortDate: "2025-08-25",
+    source: "GP Practice de Linde, Amersfoort",
+    label: "Medication restriction | Avoid NSAIDs and aspirin",
+    detail: {
+      limits: "Extended to aspirin after confirmed sensitivity testing during wrist-fracture follow-up",
+      verifiedBy: "Dr. A. Dijkstra (General Practitioner)",
+      verificationDate: "25/8/2025",
+    },
+  },
+];
+
+// Shared by Diagnoses/Treatment so they can offer the same Sort/Filters
+// experience Encounters has, without needing Encounters' own FILTER_TYPES
+// (a different taxonomy tied to visit types).
+function simpleTypeKey(item) {
+  return item.label.split("|")[0].trim();
+}
+const DIAGNOSIS_FILTER_TYPES = [...new Set(DIAGNOSIS_ENTRIES.map(simpleTypeKey))].map((key) => ({ key, label: key }));
+const TREATMENT_FILTER_TYPES = [...new Set(RESTRICTION_ENTRIES.map(simpleTypeKey))].map((key) => ({ key, label: key }));
+
+// How many of a category's own entries came from a given source — used so
+// the Sources breakdown's per-source subtext reflects what's actually on
+// screen for Diagnoses/Treatment (a handful of records) rather than reusing
+// Encounters' own fetched/total pagination counts.
+function countByOrg(entries, orgName) {
+  return entries.filter((e) => e.source === orgName).length;
+}
+
 // Shared close-on-outside-click behavior for the header dropdowns.
 function useClickOutside(ref, onOutside, active) {
   useEffect(() => {
@@ -271,28 +383,6 @@ function FadeSwap({ id, className, children }) {
           transition={{ duration: 0.18 }}
         >
           {children}
-        </motion.span>
-      </AnimatePresence>
-    </span>
-  );
-}
-
-// Small loading→check indicator for the category menu rows.
-function CategoryTick({ done }) {
-  return (
-    <span className="relative block w-[16px] h-[16px] shrink-0">
-      <AnimatePresence initial={false}>
-        <motion.span
-          key={done ? "done" : "loading"}
-          className="absolute inset-0 flex items-center justify-center"
-          initial={{ opacity: 0, scale: 0.3 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.3 }}
-          transition={iconSpring}
-        >
-          {done
-            ? <Check size={15} strokeWidth={3} style={{ color: T.success }} />
-            : <span className="block w-[13px] h-[13px] border-2 border-[#CED4DA] border-t-[#0080A3] rounded-full animate-spin" />}
         </motion.span>
       </AnimatePresence>
     </span>
@@ -398,6 +488,35 @@ function OrgDetailBlock({ detail, isFirst }) {
   );
 }
 
+function DiagnosisDetailBlock({ detail }) {
+  return (
+    <div className="px-4 py-3" style={{ backgroundColor: T.light }}>
+      <div className="mb-2">
+        <span className="text-[12px] font-bold tracking-wide" style={{ color: T.bodyText }}>{detail.org}</span>
+      </div>
+      <DetailRow label="Explanation">{detail.explanation}</DetailRow>
+      <DetailRow label="Anatom. location">{detail.location}</DetailRow>
+      <DetailRow label="Laterality">{detail.laterality}</DetailRow>
+      <DetailRow label="Verification status">{detail.verificationStatus}</DetailRow>
+      <div className="flex items-start gap-4 py-1 text-[13px]">
+        <span className="w-[120px] shrink-0" style={{ color: T.gray600 }}>Status</span>
+        <StatusBadge>{detail.status}</StatusBadge>
+      </div>
+      <DetailRow label="Date">{detail.date}</DetailRow>
+    </div>
+  );
+}
+
+function RestrictionDetailBlock({ detail }) {
+  return (
+    <div className="px-4 py-3" style={{ backgroundColor: T.light }}>
+      <DetailRow label="Limits">{detail.limits}</DetailRow>
+      <DetailRow label="Verified By">{detail.verifiedBy}</DetailRow>
+      <DetailRow label="Verification date">{detail.verificationDate}</DetailRow>
+    </div>
+  );
+}
+
 function FilterCheckbox({ label, checked, onChange }) {
   return (
     <button onClick={onChange} className="w-full flex items-center gap-2.5 py-1.5 text-[14px] text-left">
@@ -446,6 +565,231 @@ function FilterAccordion({ title, open, onToggle, children }) {
   );
 }
 
+// The left-rail status indicator — three states only (loading spinner,
+// success check, failed warning); the counts live in the Sources header.
+// Shared by all three category rows since they're populated by the same
+// underlying 5-source fetch: once it settles, it settles for
+// Encounters/Diagnoses/Treatment simultaneously.
+function CategoryIndicator({ allSettled, failedCount, isActive }) {
+  const state = !allSettled ? "loading" : failedCount > 0 ? "failed" : "done";
+  return (
+    <span className="relative block w-[18px] h-[18px] shrink-0">
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={state}
+          className="absolute inset-0 flex items-center justify-center"
+          initial={{ opacity: 0, scale: 0.3 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.3 }}
+          transition={iconSpring}
+        >
+          {state === "loading" ? (
+            <span
+              className="block w-[15px] h-[15px] border-2 rounded-full animate-spin"
+              style={isActive
+                ? { borderColor: "rgba(255,255,255,0.35)", borderTopColor: "#fff" }
+                : { borderColor: T.gray400, borderTopColor: T.primary }}
+            />
+          ) : state === "failed" ? (
+            <AlertTriangle size={15} style={{ color: T.warning }} />
+          ) : (
+            <Check size={15} strokeWidth={3} style={{ color: isActive ? "#fff" : T.success }} />
+          )}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
+// Category title + the "Sources (N/5 loaded)" collapsible breakdown — shared
+// across all three categories, since one 5-source fetch feeds all of them.
+// `categoryEntries` (Diagnoses'/Treatment's own array) switches the
+// per-source subtext from Encounters' pagination counts ("Latest N of M") to
+// a plain per-category record count — showing "Latest 10 of 16" next to a
+// 4-entry diagnosis list would just be the wrong numbers.
+function SourcesHeader({ title, sourcesOpen, setSourcesOpen, sourceStatus, loadedCount, allSettled, failedCount, lastUpdated, onRefresh, onRetry, categoryEntries }) {
+  return (
+    <>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-[22px] font-semibold leading-tight" style={{ color: T.bodyText }}>{title}</h2>
+        <div className="flex items-center gap-3 text-sm" style={{ color: T.gray600 }}>
+          <button onClick={() => setSourcesOpen((v) => !v)} className="flex items-center gap-1.5">
+            <span className="relative block w-[14px] h-[14px]">
+              <AnimatePresence initial={false}>
+                <motion.span
+                  key={!allSettled ? "pending" : failedCount > 0 ? "failed" : "done"}
+                  className="absolute inset-0 flex items-center justify-center"
+                  initial={{ opacity: 0, scale: 0.3 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.3 }}
+                  transition={iconSpring}
+                >
+                  {!allSettled
+                    ? <AlertCircle size={14} style={{ color: T.warning, fill: T.warning, stroke: "#fff" }} />
+                    : failedCount > 0
+                      ? <AlertTriangle size={14} className="text-red-600" />
+                      : <CheckCircle2 size={14} style={{ color: T.success }} />}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+            <span className="underline underline-offset-2" style={{ color: T.bodyText }}>
+              Sources ({loadedCount}/{SOURCE_CONFIG.length} loaded)
+            </span>
+            {sourcesOpen ? <ChevronUp size={14} style={{ color: T.primary }} /> : <ChevronDown size={14} style={{ color: T.primary }} />}
+          </button>
+          <FadeSwap id={allSettled ? "complete" : "updating"}>
+            {allSettled
+              ? <span>Complete as of {lastUpdated ? formatClock(lastUpdated) : "—"}</span>
+              : <span>Updated: {lastUpdated ? formatClock(lastUpdated) : "—"}</span>}
+          </FadeSwap>
+          <motion.button onClick={onRefresh} aria-label="Refresh" whileTap={{ scale: 0.85, rotate: 90 }}>
+            <RefreshCw size={15} style={{ color: T.primary }} />
+          </motion.button>
+        </div>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {sourcesOpen && (
+          <motion.div
+            key="sources-panel"
+            className="overflow-hidden"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+          >
+            <div className="rounded-md overflow-hidden mb-4 border border-[#DEE2E6]">
+              {SOURCE_CONFIG.map((source, i) => {
+                const status = sourceStatus[source.id] || { state: "loading" };
+                const categoryTotal = categoryEntries ? countByOrg(categoryEntries, source.name) : null;
+                const showSubline =
+                  status.state === "empty" ||
+                  status.state === "failed" ||
+                  (status.state === "loaded" && (categoryEntries ? true : status.fetched < status.total));
+                const sublineText =
+                  status.state === "failed"
+                    ? "Fetch failed"
+                    : status.state === "empty" || (categoryEntries && categoryTotal === 0)
+                      ? "No records found for this patient"
+                      : categoryEntries
+                        ? `${categoryTotal} record${categoryTotal === 1 ? "" : "s"} loaded`
+                        : `Latest ${status.fetched} of ${status.total} records loaded`;
+                return (
+                  <div
+                    key={source.id}
+                    className={`flex items-center justify-between px-4 py-2.5 text-sm ${i > 0 ? "border-t border-white" : ""}`}
+                    style={{ backgroundColor: T.lightBg }}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <StatusIcon state={status.state} />
+                      <div>
+                        <div className={`font-semibold text-[14px] ${status.state === "failed" ? "text-red-700" : ""}`} style={status.state === "failed" ? undefined : { color: T.bodyText }}>
+                          {source.name}
+                        </div>
+                        <AnimatePresence initial={false}>
+                          {showSubline && (
+                            <motion.div
+                              key="subline"
+                              className="overflow-hidden"
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: "easeOut" }}
+                            >
+                              <div className="text-[13px]" style={{ color: status.state === "failed" ? "#dc2626" : T.gray500 }}>
+                                {sublineText}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                    <FadeSwap id={status.state === "loading" ? `loading-${status.phase || "initial"}` : status.state} className="text-sm">
+                      {status.state === "loading" && (
+                        <span style={{ color: T.gray600 }}>{status.phase === "more" ? "fetching more…" : "fetching…"}</span>
+                      )}
+                      {(status.state === "loaded" || status.state === "empty") && <span style={{ color: T.gray600 }}>{formatClock(status.time)}</span>}
+                      {status.state === "failed" && (
+                        <motion.button onClick={() => onRetry(source.id)} aria-label="Retry" whileTap={{ scale: 0.85, rotate: 90 }}>
+                          <RefreshCw size={15} className="text-gray-500 hover:text-gray-800" />
+                        </motion.button>
+                      )}
+                    </FadeSwap>
+                  </div>
+                );
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+// The Past/Planned status pills + Sort + Filters row — identical across
+// Encounters/Diagnoses/Treatment (only one is ever mounted at a time, since
+// the three categories are mutually exclusive), so sortOrder/sortMenuOpen and
+// the filter drawer they open are safely shared state rather than duplicated
+// per category.
+function CategoryToolbar({ pastCount, filterCount, sortOrder, sortMenuOpen, setSortMenuOpen, sortMenuRef, changeSortOrder, onOpenFilters }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-2">
+        <span className="text-white text-sm font-semibold px-3 py-1 rounded-full" style={{ backgroundColor: T.primary }}>Past ({pastCount})</span>
+        <span className="text-sm px-3 py-1" style={{ color: T.gray600 }}>Planned (0)</span>
+      </div>
+      <div className="flex items-center gap-4 text-sm" style={{ color: T.primary }}>
+        <div className="relative" ref={sortMenuRef}>
+          <button onClick={() => setSortMenuOpen((v) => !v)} className="flex items-center gap-1">
+            <ArrowUpDown size={14} /> Sort: {sortOrder === "oldest" ? "Oldest first" : "Newest first"}
+          </button>
+          <AnimatePresence>
+            {sortMenuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className="absolute left-0 top-full mt-2 w-44 rounded-md border bg-white shadow-lg overflow-hidden z-20"
+                style={{ borderColor: T.border }}
+              >
+                {["newest", "oldest"].map((o) => (
+                  <button
+                    key={o}
+                    onClick={() => changeSortOrder(o)}
+                    className="w-full text-left px-4 py-2.5 text-[14px]"
+                    style={{ color: T.bodyText, backgroundColor: sortOrder === o ? T.light : "#fff" }}
+                  >
+                    {o === "oldest" ? "Oldest first" : "Newest first"}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <button onClick={onOpenFilters} className="flex items-center gap-1.5">
+          <Filter size={14} /> Filters
+          <AnimatePresence>
+            {filterCount > 0 && (
+              <motion.span
+                key="badge"
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0, opacity: 0 }}
+                transition={iconSpring}
+                className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full text-white text-[11px] font-bold"
+                style={{ backgroundColor: T.primary }}
+              >
+                {filterCount}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
   const [runId, setRunId] = useState(0);
   const [sourceStatus, setSourceStatus] = useState({});
@@ -453,10 +797,13 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
   const [queuedItems, setQueuedItems] = useState(null);
   const [sourcesOpen, setSourcesOpen] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
-  // Simulated load state of the other categories (not wired to real data).
-  const [categoryDone, setCategoryDone] = useState({ klachten: false, treatment: false });
   const [expandedIds, setExpandedIds] = useState({});
   const toggleExpand = (id) => setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  // Which left-rail category's content shows in the right column. All three
+  // read the same underlying 5-source fetch above.
+  const [activeCategory, setActiveCategory] = useState("encounters");
+  const [diagnosisTypeFilters, setDiagnosisTypeFilters] = useState(new Set());
+  const [treatmentTypeFilters, setTreatmentTypeFilters] = useState(new Set());
 
   // Sort order: a display preference, re-applied to whatever is already
   // merged rather than re-running the simulation.
@@ -561,10 +908,6 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
     setExpandedIds({});
     setSourceStatus(Object.fromEntries(SOURCE_CONFIG.map((s) => [s.id, { state: "loading" }])));
     SOURCE_CONFIG.forEach(runSource);
-    // Mock loads for the other categories, so the whole menu comes alive.
-    setCategoryDone({ klachten: false, treatment: false });
-    timeoutsRef.current.push(setTimeout(() => setCategoryDone((p) => ({ ...p, treatment: true })), 4000 + Math.random() * 3000));
-    timeoutsRef.current.push(setTimeout(() => setCategoryDone((p) => ({ ...p, klachten: true })), 8000 + Math.random() * 4000));
   }, [runSource]);
 
   useEffect(() => {
@@ -682,6 +1025,28 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
 
   const displayedItems = visibleItems.filter(passesFilters);
 
+  const toggleDiagnosisType = (key) => {
+    setDiagnosisTypeFilters((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+  const toggleTreatmentType = (key) => {
+    setTreatmentTypeFilters((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
+
+  const displayedDiagnoses = applySort(
+    DIAGNOSIS_ENTRIES.filter((item) => diagnosisTypeFilters.size === 0 || diagnosisTypeFilters.has(simpleTypeKey(item)))
+  );
+  const displayedRestrictions = applySort(
+    RESTRICTION_ENTRIES.filter((item) => treatmentTypeFilters.size === 0 || treatmentTypeFilters.has(simpleTypeKey(item)))
+  );
+
   // Records known to exist on the server but not yet fetched (e.g. Maastricht
   // reported total 16 and delivered 10). This is what "Show more" loads —
   // it's hidden entirely once the picture is complete.
@@ -694,332 +1059,356 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
     <>
     <div className="grid grid-cols-[300px_1fr] gap-10">
       <div className="flex flex-col self-start sticky top-6">
-        <div className="text-white font-semibold text-sm tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5 rounded-t-sm" style={{ backgroundColor: T.primary }}>
-          <span className="flex items-center gap-2.5"><CalendarDays size={16} /> ENCOUNTERS</span>
-          {/* Live per-category indicator: counts up per settled source, then
-              resolves to a check (or warning when a source failed). */}
-          <span className="relative block w-[32px] h-[18px] shrink-0">
-            <AnimatePresence initial={false}>
-              <motion.span
-                key={!allSettled ? `n${loadedCount}` : failedCount > 0 ? "warn" : "done"}
-                className="absolute inset-0 flex items-center justify-end"
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.18 }}
-              >
-                {!allSettled
-                  ? <span className="text-[13px] font-semibold tabular-nums">{loadedCount}/{SOURCE_CONFIG.length}</span>
-                  : failedCount > 0
-                    ? <AlertTriangle size={14} style={{ color: T.warning }} />
-                    : <Check size={15} strokeWidth={3} />}
-              </motion.span>
-            </AnimatePresence>
+        <button
+          onClick={() => setActiveCategory("encounters")}
+          className="font-semibold text-sm tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5 rounded-t-sm text-left"
+          style={{ backgroundColor: activeCategory === "encounters" ? T.primary : "#fff", color: activeCategory === "encounters" ? "#fff" : T.bodyText }}
+        >
+          <span className="flex items-center gap-2.5">
+            <CalendarDays size={16} style={{ color: activeCategory === "encounters" ? "#fff" : T.primary }} /> ENCOUNTERS
           </span>
-        </div>
-        <div className="border border-t-0 border-[#DEE2E6] bg-white text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5" style={{ color: T.bodyText }}>
-          <span className="flex items-center gap-2.5"><Stethoscope size={16} style={{ color: T.primary }} /> KLACHTEN EN DIAGNOSES</span>
-          <CategoryTick done={categoryDone.klachten} />
-        </div>
-        <div className="border border-t-0 border-[#DEE2E6] bg-white text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5" style={{ color: T.bodyText }}>
-          <span className="flex items-center gap-2.5"><ClipboardList size={16} style={{ color: T.primary }} /> TREATMENT RESTRICTIONS</span>
-          <CategoryTick done={categoryDone.treatment} />
-        </div>
+          <CategoryIndicator allSettled={allSettled} failedCount={failedCount} isActive={activeCategory === "encounters"} />
+        </button>
+        <button
+          onClick={() => setActiveCategory("diagnoses")}
+          className="border border-t-0 border-[#DEE2E6] text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5 text-left"
+          style={{ backgroundColor: activeCategory === "diagnoses" ? T.primary : "#fff", color: activeCategory === "diagnoses" ? "#fff" : T.bodyText }}
+        >
+          <span className="flex items-center gap-2.5">
+            <Stethoscope size={16} style={{ color: activeCategory === "diagnoses" ? "#fff" : T.primary }} /> KLACHTEN EN DIAGNOSES
+          </span>
+          <CategoryIndicator allSettled={allSettled} failedCount={failedCount} isActive={activeCategory === "diagnoses"} />
+        </button>
+        <button
+          onClick={() => setActiveCategory("treatment")}
+          className="border border-t-0 border-[#DEE2E6] text-sm font-semibold tracking-wide px-4 py-3.5 flex items-center justify-between gap-2.5 text-left"
+          style={{ backgroundColor: activeCategory === "treatment" ? T.primary : "#fff", color: activeCategory === "treatment" ? "#fff" : T.bodyText }}
+        >
+          <span className="flex items-center gap-2.5">
+            <ClipboardList size={16} style={{ color: activeCategory === "treatment" ? "#fff" : T.primary }} /> TREATMENT RESTRICTIONS
+          </span>
+          <CategoryIndicator allSettled={allSettled} failedCount={failedCount} isActive={activeCategory === "treatment"} />
+        </button>
       </div>
 
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-[22px] font-semibold leading-tight" style={{ color: T.bodyText }}>Encounters</h2>
-          <div className="flex items-center gap-3 text-sm" style={{ color: T.gray600 }}>
-            <button
-              onClick={() => setSourcesOpen((v) => !v)}
-              className="flex items-center gap-1.5"
-            >
-              <span className="relative block w-[14px] h-[14px]">
-                <AnimatePresence initial={false}>
-                  <motion.span
-                    key={!allSettled ? "pending" : failedCount > 0 ? "failed" : "done"}
-                    className="absolute inset-0 flex items-center justify-center"
-                    initial={{ opacity: 0, scale: 0.3 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.3 }}
-                    transition={iconSpring}
+        {activeCategory === "encounters" && (
+          <>
+            <SourcesHeader
+              title="Encounters"
+              sourcesOpen={sourcesOpen}
+              setSourcesOpen={setSourcesOpen}
+              sourceStatus={sourceStatus}
+              loadedCount={loadedCount}
+              allSettled={allSettled}
+              failedCount={failedCount}
+              lastUpdated={lastUpdated}
+              onRefresh={() => setRunId((r) => r + 1)}
+              onRetry={retrySource}
+            />
+            <CategoryToolbar
+              pastCount={24}
+              filterCount={activeFilterCount}
+              sortOrder={sortOrder}
+              sortMenuOpen={sortMenuOpen}
+              setSortMenuOpen={setSortMenuOpen}
+              sortMenuRef={sortMenuRef}
+              changeSortOrder={changeSortOrder}
+              onOpenFilters={() => setFiltersOpen(true)}
+            />
+
+            <AnimatePresence initial={false}>
+              {queuedItems && (
+                <motion.div
+                  key="queued-banner"
+                  className="overflow-hidden"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                >
+                  <motion.button
+                    onClick={applyQueued}
+                    whileTap={{ scale: 0.98 }}
+                    className="w-full mb-3 flex items-center justify-center gap-2 text-sm rounded-md py-2 border"
+                    style={{ backgroundColor: T.light, borderColor: T.primary, color: T.primary }}
                   >
-                    {!allSettled
-                      ? <AlertCircle size={14} style={{ color: T.warning, fill: T.warning, stroke: "#fff" }} />
-                      : failedCount > 0
-                        ? <AlertTriangle size={14} className="text-red-600" />
-                        : <CheckCircle2 size={14} style={{ color: T.success }} />}
-                  </motion.span>
-                </AnimatePresence>
-              </span>
-              <span className="underline underline-offset-2" style={{ color: T.bodyText }}>
-                Sources ({loadedCount}/{SOURCE_CONFIG.length} loaded)
-              </span>
-              {sourcesOpen ? <ChevronUp size={14} style={{ color: T.primary }} /> : <ChevronDown size={14} style={{ color: T.primary }} />}
-            </button>
-            <FadeSwap id={allSettled ? "complete" : "updating"}>
-              {allSettled
-                ? <span>Complete as of {lastUpdated ? formatClock(lastUpdated) : "—"}</span>
-                : <span>Updated: {lastUpdated ? formatClock(lastUpdated) : "—"}</span>}
-            </FadeSwap>
-            <motion.button onClick={() => setRunId((r) => r + 1)} aria-label="Refresh" whileTap={{ scale: 0.85, rotate: 90 }}>
-              <RefreshCw size={15} style={{ color: T.primary }} />
-            </motion.button>
-          </div>
-        </div>
+                    <ArrowDown size={14} /> New entries available — click to update
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        <AnimatePresence initial={false}>
-          {sourcesOpen && (
-            <motion.div
-              key="sources-panel"
-              className="overflow-hidden"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-            >
-              <div className="rounded-md overflow-hidden mb-4 border border-[#DEE2E6]">
-                {SOURCE_CONFIG.map((source, i) => {
-                  const status = sourceStatus[source.id] || { state: "loading" };
-                  return (
-                    <div
-                      key={source.id}
-                      className={`flex items-center justify-between px-4 py-2.5 text-sm ${i > 0 ? "border-t border-white" : ""}`}
-                      style={{ backgroundColor: T.lightBg }}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <StatusIcon state={status.state} />
-                        <div>
-                          <div className={`font-semibold text-[14px] ${status.state === "failed" ? "text-red-700" : ""}`} style={status.state === "failed" ? undefined : { color: T.bodyText }}>
-                            {source.name}
-                          </div>
-                          <AnimatePresence initial={false}>
-                            {(status.state === "empty" || status.state === "failed" || (status.state === "loaded" && status.fetched < status.total)) && (
-                              <motion.div
-                                key="subline"
-                                className="overflow-hidden"
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: "auto", opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.2, ease: "easeOut" }}
-                              >
-                                <div className="text-[13px]" style={{ color: status.state === "failed" ? "#dc2626" : T.gray500 }}>
-                                  {status.state === "failed"
-                                    ? "Fetch failed"
-                                    : status.state === "empty"
-                                      ? "No records found for this patient"
-                                      : `Latest ${status.fetched} of ${status.total} records loaded`}
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                      <FadeSwap id={status.state === "loading" ? `loading-${status.phase || "initial"}` : status.state} className="text-sm" >
-                        {status.state === "loading" && (
-                          <span style={{ color: T.gray600 }}>{status.phase === "more" ? "fetching more…" : "fetching…"}</span>
-                        )}
-                        {(status.state === "loaded" || status.state === "empty") && <span style={{ color: T.gray600 }}>{formatClock(status.time)}</span>}
-                        {status.state === "failed" && (
-                          <motion.button onClick={() => retrySource(source.id)} aria-label="Retry" whileTap={{ scale: 0.85, rotate: 90 }}>
-                            <RefreshCw size={15} className="text-gray-500 hover:text-gray-800" />
-                          </motion.button>
-                        )}
-                      </FadeSwap>
-                    </div>
-                  );
-                })}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <span className="text-white text-sm font-semibold px-3 py-1 rounded-full" style={{ backgroundColor: T.primary }}>Past (24)</span>
-            <span className="text-sm px-3 py-1" style={{ color: T.gray600 }}>Planned (0)</span>
-          </div>
-          <div className="flex items-center gap-4 text-sm" style={{ color: T.primary }}>
-            <div className="relative" ref={sortMenuRef}>
-              <button onClick={() => setSortMenuOpen((v) => !v)} className="flex items-center gap-1">
-                <ArrowUpDown size={14} /> Sort: {sortOrder === "oldest" ? "Oldest first" : "Newest first"}
-              </button>
-              <AnimatePresence>
-                {sortMenuOpen && (
+            <div className="flex flex-col gap-2">
+              <AnimatePresence initial={false}>
+                {visibleItems.length === 0 && (
                   <motion.div
-                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute left-0 top-full mt-2 w-44 rounded-md border bg-white shadow-lg overflow-hidden z-20"
-                    style={{ borderColor: T.border }}
+                    key="empty-state"
+                    className="text-sm py-6 text-center border rounded-md"
+                    style={{ color: T.gray500, borderColor: T.border }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, transition: { duration: 0.12 } }}
                   >
-                    {["newest", "oldest"].map((o) => (
-                      <button
-                        key={o}
-                        onClick={() => changeSortOrder(o)}
-                        className="w-full text-left px-4 py-2.5 text-[14px]"
-                        style={{ color: T.bodyText, backgroundColor: sortOrder === o ? T.light : "#fff" }}
-                      >
-                        {o === "oldest" ? "Oldest first" : "Newest first"}
-                      </button>
-                    ))}
+                    Loading first results…
                   </motion.div>
                 )}
+                {visibleItems.length > 0 && displayedItems.length === 0 && (
+                  <motion.div
+                    key="filtered-empty"
+                    className="text-sm py-6 text-center border rounded-md"
+                    style={{ color: T.gray500, borderColor: T.border }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                  >
+                    No encounters match the selected filters.{" "}
+                    <button onClick={clearFilters} className="underline font-semibold" style={{ color: T.primary }}>
+                      Clear filters
+                    </button>
+                  </motion.div>
+                )}
+                {displayedItems.map((item) => {
+                  const isExpanded = !!expandedIds[item.id];
+                  const details = ENCOUNTER_DETAILS[item.id] || genericDetail(item);
+                  return (
+                    <motion.div
+                      key={item.id}
+                      layout
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
+                      transition={{ ...cardSpring, opacity: { duration: 0.25 } }}
+                      className="border rounded-md bg-white overflow-hidden"
+                      style={{ borderColor: T.border }}
+                    >
+                      <button
+                        onClick={() => toggleExpand(item.id)}
+                        className="w-full text-left px-4 py-3 hover:bg-black/[0.02]"
+                      >
+                        <div className="flex items-center justify-between text-[13px] mb-1" style={{ color: T.gray600 }}>
+                          <span>{item.date}</span>
+                          <span><SourceLabel source={item.source} /></span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[14px] font-semibold" style={{ color: T.primary }}>{item.label}</span>
+                          <motion.span
+                            animate={{ rotate: isExpanded ? 180 : 0 }}
+                            transition={{ duration: 0.2, ease: "easeInOut" }}
+                            className="shrink-0"
+                          >
+                            <ChevronDown size={16} style={{ color: T.primary }} />
+                          </motion.span>
+                        </div>
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {isExpanded && (
+                          <motion.div
+                            key="detail"
+                            className="overflow-hidden border-t"
+                            style={{ borderColor: T.border }}
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.25, ease: "easeInOut" }}
+                          >
+                            {details.map((d, i) => (
+                              <OrgDetailBlock key={i} detail={d} isFirst={i === 0} />
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  );
+                })}
               </AnimatePresence>
             </div>
-            <button onClick={() => setFiltersOpen(true)} className="flex items-center gap-1.5">
-              <Filter size={14} /> Filters
-              <AnimatePresence>
-                {activeFilterCount > 0 && (
-                  <motion.span
-                    key="badge"
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0, opacity: 0 }}
-                    transition={iconSpring}
-                    className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full text-white text-[11px] font-bold"
-                    style={{ backgroundColor: T.primary }}
+
+            <AnimatePresence initial={false}>
+              {serverRemaining > 0 && (
+                <motion.div
+                  key="show-more"
+                  className="flex justify-center mt-4"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <motion.button
+                    onClick={fetchMoreFromSources}
+                    whileTap={{ scale: 0.97 }}
+                    className="border text-sm rounded-md px-6 py-2"
+                    style={{ borderColor: T.primary, color: T.primary }}
                   >
-                    {activeFilterCount}
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </button>
-          </div>
-        </div>
+                    Show more{" "}
+                    <FadeSwap id={serverRemaining} className="inline-flex">
+                      <span>({serverRemaining})</span>
+                    </FadeSwap>
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
 
-        <AnimatePresence initial={false}>
-          {queuedItems && (
-            <motion.div
-              key="queued-banner"
-              className="overflow-hidden"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
-            >
-              <motion.button
-                onClick={applyQueued}
-                whileTap={{ scale: 0.98 }}
-                className="w-full mb-3 flex items-center justify-center gap-2 text-sm rounded-md py-2 border"
-                style={{ backgroundColor: T.light, borderColor: T.primary, color: T.primary }}
-              >
-                <ArrowDown size={14} /> New entries available — click to update
-              </motion.button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div className="flex flex-col gap-2">
-          <AnimatePresence initial={false}>
-            {visibleItems.length === 0 && (
-              <motion.div
-                key="empty-state"
-                className="text-sm py-6 text-center border rounded-md"
-                style={{ color: T.gray500, borderColor: T.border }}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: 0.12 } }}
-              >
-                Loading first results…
-              </motion.div>
-            )}
-            {visibleItems.length > 0 && displayedItems.length === 0 && (
-              <motion.div
-                key="filtered-empty"
-                className="text-sm py-6 text-center border rounded-md"
-                style={{ color: T.gray500, borderColor: T.border }}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0, transition: { duration: 0.12 } }}
-              >
-                No encounters match the selected filters.{" "}
-                <button onClick={clearFilters} className="underline font-semibold" style={{ color: T.primary }}>
+        {activeCategory === "diagnoses" && (
+          <>
+            <SourcesHeader
+              title="Klachten en diagnoses"
+              sourcesOpen={sourcesOpen}
+              setSourcesOpen={setSourcesOpen}
+              sourceStatus={sourceStatus}
+              loadedCount={loadedCount}
+              allSettled={allSettled}
+              failedCount={failedCount}
+              lastUpdated={lastUpdated}
+              onRefresh={() => setRunId((r) => r + 1)}
+              onRetry={retrySource}
+              categoryEntries={DIAGNOSIS_ENTRIES}
+            />
+            <CategoryToolbar
+              pastCount={DIAGNOSIS_ENTRIES.length}
+              filterCount={diagnosisTypeFilters.size}
+              sortOrder={sortOrder}
+              sortMenuOpen={sortMenuOpen}
+              setSortMenuOpen={setSortMenuOpen}
+              sortMenuRef={sortMenuRef}
+              changeSortOrder={changeSortOrder}
+              onOpenFilters={() => setFiltersOpen(true)}
+            />
+            {displayedDiagnoses.length === 0 && (
+              <div className="text-sm py-6 text-center border rounded-md" style={{ color: T.gray500, borderColor: T.border }}>
+                No entries match the selected filters.{" "}
+                <button onClick={() => setDiagnosisTypeFilters(new Set())} className="underline font-semibold" style={{ color: T.primary }}>
                   Clear filters
                 </button>
-              </motion.div>
+              </div>
             )}
-            {displayedItems.map((item) => {
-              const isExpanded = !!expandedIds[item.id];
-              const details = ENCOUNTER_DETAILS[item.id] || genericDetail(item);
-              return (
-                <motion.div
-                  key={item.id}
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.15 } }}
-                  transition={{ ...cardSpring, opacity: { duration: 0.25 } }}
-                  className="border rounded-md bg-white overflow-hidden"
-                  style={{ borderColor: T.border }}
-                >
-                  <button
-                    onClick={() => toggleExpand(item.id)}
-                    className="w-full text-left px-4 py-3 hover:bg-black/[0.02]"
+            <div className="flex flex-col gap-2">
+              {displayedDiagnoses.map((item) => {
+                const isExpanded = !!expandedIds[item.id];
+                return (
+                  <motion.div
+                    key={item.id}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={cardSpring}
+                    className="border rounded-md bg-white overflow-hidden"
+                    style={{ borderColor: T.border }}
                   >
-                    <div className="flex items-center justify-between text-[13px] mb-1" style={{ color: T.gray600 }}>
-                      <span>{item.date}</span>
-                      <span><SourceLabel source={item.source} /></span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[14px] font-semibold" style={{ color: T.primary }}>{item.label}</span>
-                      <motion.span
-                        animate={{ rotate: isExpanded ? 180 : 0 }}
-                        transition={{ duration: 0.2, ease: "easeInOut" }}
-                        className="shrink-0"
-                      >
-                        <ChevronDown size={16} style={{ color: T.primary }} />
-                      </motion.span>
-                    </div>
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {isExpanded && (
-                      <motion.div
-                        key="detail"
-                        className="overflow-hidden border-t"
-                        style={{ borderColor: T.border }}
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.25, ease: "easeInOut" }}
-                      >
-                        {details.map((d, i) => (
-                          <OrgDetailBlock key={i} detail={d} isFirst={i === 0} />
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              );
-            })}
-          </AnimatePresence>
-        </div>
+                    <button onClick={() => toggleExpand(item.id)} className="w-full text-left px-4 py-3 hover:bg-black/[0.02]">
+                      <div className="flex items-center justify-between text-[13px] mb-1" style={{ color: T.gray600 }}>
+                        <span>{item.date}</span>
+                        <span>{item.source}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[14px] font-semibold" style={{ color: T.primary }}>{item.label}</span>
+                        <motion.span animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="shrink-0">
+                          <ChevronDown size={16} style={{ color: T.primary }} />
+                        </motion.span>
+                      </div>
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {isExpanded && (
+                        <motion.div
+                          key="detail"
+                          className="overflow-hidden border-t"
+                          style={{ borderColor: T.border }}
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: "easeInOut" }}
+                        >
+                          <DiagnosisDetailBlock detail={item.detail} />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </>
+        )}
 
-        <AnimatePresence initial={false}>
-          {serverRemaining > 0 && (
-            <motion.div
-              key="show-more"
-              className="flex justify-center mt-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            >
-              <motion.button
-                onClick={fetchMoreFromSources}
-                whileTap={{ scale: 0.97 }}
-                className="border text-sm rounded-md px-6 py-2"
-                style={{ borderColor: T.primary, color: T.primary }}
-              >
-                Show more{" "}
-                <FadeSwap id={serverRemaining} className="inline-flex">
-                  <span>({serverRemaining})</span>
-                </FadeSwap>
-              </motion.button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {activeCategory === "treatment" && (
+          <>
+            <SourcesHeader
+              title="Treatment restrictions"
+              sourcesOpen={sourcesOpen}
+              setSourcesOpen={setSourcesOpen}
+              sourceStatus={sourceStatus}
+              loadedCount={loadedCount}
+              allSettled={allSettled}
+              failedCount={failedCount}
+              lastUpdated={lastUpdated}
+              onRefresh={() => setRunId((r) => r + 1)}
+              onRetry={retrySource}
+              categoryEntries={RESTRICTION_ENTRIES}
+            />
+            <CategoryToolbar
+              pastCount={RESTRICTION_ENTRIES.length}
+              filterCount={treatmentTypeFilters.size}
+              sortOrder={sortOrder}
+              sortMenuOpen={sortMenuOpen}
+              setSortMenuOpen={setSortMenuOpen}
+              sortMenuRef={sortMenuRef}
+              changeSortOrder={changeSortOrder}
+              onOpenFilters={() => setFiltersOpen(true)}
+            />
+            {displayedRestrictions.length === 0 && (
+              <div className="text-sm py-6 text-center border rounded-md" style={{ color: T.gray500, borderColor: T.border }}>
+                No entries match the selected filters.{" "}
+                <button onClick={() => setTreatmentTypeFilters(new Set())} className="underline font-semibold" style={{ color: T.primary }}>
+                  Clear filters
+                </button>
+              </div>
+            )}
+            <div className="flex flex-col gap-2">
+              {displayedRestrictions.map((item) => {
+                const isExpanded = !!expandedIds[item.id];
+                return (
+                  <motion.div
+                    key={item.id}
+                    layout
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={cardSpring}
+                    className="border rounded-md bg-white overflow-hidden"
+                    style={{ borderColor: T.border }}
+                  >
+                    <button onClick={() => toggleExpand(item.id)} className="w-full text-left px-4 py-3 hover:bg-black/[0.02]">
+                      <div className="flex items-center justify-between text-[13px] mb-1" style={{ color: T.gray600 }}>
+                        <span>{item.date}</span>
+                        <span>{item.source}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[14px] font-semibold" style={{ color: T.danger }}>{item.label}</span>
+                        <motion.span animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2, ease: "easeInOut" }} className="shrink-0">
+                          <ChevronDown size={16} style={{ color: T.danger }} />
+                        </motion.span>
+                      </div>
+                    </button>
+                    <AnimatePresence initial={false}>
+                      {isExpanded && (
+                        <motion.div
+                          key="detail"
+                          className="overflow-hidden border-t"
+                          style={{ borderColor: T.border }}
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.25, ease: "easeInOut" }}
+                        >
+                          <RestrictionDetailBlock detail={item.detail} />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
 
@@ -1051,58 +1440,102 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
-                <FilterAccordion
-                  title="Status"
-                  open={drawerSections.status}
-                  onToggle={() => setDrawerSections((p) => ({ ...p, status: !p.status }))}
-                >
-                  <FilterCheckbox
-                    label="Arrived"
-                    checked={statusFilters.arrived}
-                    onChange={() => setStatusFilters((p) => ({ ...p, arrived: !p.arrived }))}
-                  />
-                  <FilterCheckbox
-                    label="Planned"
-                    checked={statusFilters.planned}
-                    onChange={() => setStatusFilters((p) => ({ ...p, planned: !p.planned }))}
-                  />
-                </FilterAccordion>
+              {activeCategory === "encounters" && (
+                <>
+                  <div className="flex-1 overflow-y-auto">
+                    <FilterAccordion
+                      title="Status"
+                      open={drawerSections.status}
+                      onToggle={() => setDrawerSections((p) => ({ ...p, status: !p.status }))}
+                    >
+                      <FilterCheckbox
+                        label="Arrived"
+                        checked={statusFilters.arrived}
+                        onChange={() => setStatusFilters((p) => ({ ...p, arrived: !p.arrived }))}
+                      />
+                      <FilterCheckbox
+                        label="Planned"
+                        checked={statusFilters.planned}
+                        onChange={() => setStatusFilters((p) => ({ ...p, planned: !p.planned }))}
+                      />
+                    </FilterAccordion>
 
-                <FilterAccordion
-                  title="Encounter type"
-                  open={drawerSections.encounterType}
-                  onToggle={() => setDrawerSections((p) => ({ ...p, encounterType: !p.encounterType }))}
-                >
-                  {FILTER_TYPES.map((t) => (
-                    <FilterCheckbox key={t.key} label={t.label} checked={typeFilters.has(t.key)} onChange={() => toggleType(t.key)} />
-                  ))}
-                </FilterAccordion>
+                    <FilterAccordion
+                      title="Encounter type"
+                      open={drawerSections.encounterType}
+                      onToggle={() => setDrawerSections((p) => ({ ...p, encounterType: !p.encounterType }))}
+                    >
+                      {FILTER_TYPES.map((ft) => (
+                        <FilterCheckbox key={ft.key} label={ft.label} checked={typeFilters.has(ft.key)} onChange={() => toggleType(ft.key)} />
+                      ))}
+                    </FilterAccordion>
 
-                <FilterAccordion
-                  title="Care provider"
-                  open={drawerSections.careProvider}
-                  onToggle={() => setDrawerSections((p) => ({ ...p, careProvider: !p.careProvider }))}
-                >
-                  <div className="relative">
-                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: T.gray500 }} />
-                    <input
-                      value={careProviderQuery}
-                      onChange={(e) => setCareProviderQuery(e.target.value)}
-                      placeholder="Search care provider"
-                      className="w-full pl-8 pr-3 py-2 text-[14px] rounded border bg-white outline-none"
-                      style={{ borderColor: T.gray400, color: T.bodyText }}
-                    />
+                    <FilterAccordion
+                      title="Care provider"
+                      open={drawerSections.careProvider}
+                      onToggle={() => setDrawerSections((p) => ({ ...p, careProvider: !p.careProvider }))}
+                    >
+                      <div className="relative">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: T.gray500 }} />
+                        <input
+                          value={careProviderQuery}
+                          onChange={(e) => setCareProviderQuery(e.target.value)}
+                          placeholder="Search care provider"
+                          className="w-full pl-8 pr-3 py-2 text-[14px] rounded border bg-white outline-none"
+                          style={{ borderColor: T.gray400, color: T.bodyText }}
+                        />
+                      </div>
+                    </FilterAccordion>
                   </div>
-                </FilterAccordion>
-              </div>
 
-              {activeFilterCount > 0 && (
-                <div className="px-5 py-3 border-t shrink-0" style={{ borderColor: T.border }}>
-                  <button onClick={clearFilters} className="text-[14px] font-semibold" style={{ color: T.primary }}>
-                    Clear all filters
-                  </button>
-                </div>
+                  {activeFilterCount > 0 && (
+                    <div className="px-5 py-3 border-t shrink-0" style={{ borderColor: T.border }}>
+                      <button onClick={clearFilters} className="text-[14px] font-semibold" style={{ color: T.primary }}>
+                        Clear all filters
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {activeCategory === "diagnoses" && (
+                <>
+                  <div className="flex-1 overflow-y-auto">
+                    <FilterAccordion title="Type" open onToggle={() => {}}>
+                      {DIAGNOSIS_FILTER_TYPES.map((ft) => (
+                        <FilterCheckbox key={ft.key} label={ft.label} checked={diagnosisTypeFilters.has(ft.key)} onChange={() => toggleDiagnosisType(ft.key)} />
+                      ))}
+                    </FilterAccordion>
+                  </div>
+
+                  {diagnosisTypeFilters.size > 0 && (
+                    <div className="px-5 py-3 border-t shrink-0" style={{ borderColor: T.border }}>
+                      <button onClick={() => setDiagnosisTypeFilters(new Set())} className="text-[14px] font-semibold" style={{ color: T.primary }}>
+                        Clear all filters
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {activeCategory === "treatment" && (
+                <>
+                  <div className="flex-1 overflow-y-auto">
+                    <FilterAccordion title="Type" open onToggle={() => {}}>
+                      {TREATMENT_FILTER_TYPES.map((ft) => (
+                        <FilterCheckbox key={ft.key} label={ft.label} checked={treatmentTypeFilters.has(ft.key)} onChange={() => toggleTreatmentType(ft.key)} />
+                      ))}
+                    </FilterAccordion>
+                  </div>
+
+                  {treatmentTypeFilters.size > 0 && (
+                    <div className="px-5 py-3 border-t shrink-0" style={{ borderColor: T.border }}>
+                      <button onClick={() => setTreatmentTypeFilters(new Set())} className="text-[14px] font-semibold" style={{ color: T.primary }}>
+                        Clear all filters
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </motion.div>
           </>
