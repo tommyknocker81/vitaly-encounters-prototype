@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -6,6 +6,7 @@ import {
   AlertTriangle, AlertCircle, ArrowUpDown, Filter, ArrowDown, CalendarDays, Stethoscope,
   ClipboardList, Users, Repeat, CornerDownRight, LayoutGrid, Bell, List, UserPlus,
   FileText, BarChart3, History, User, Check, ExternalLink, Plus, X, Search,
+  Download, Printer, Menu, MoreVertical, Minus, Minimize2,
 } from "lucide-react";
 
 // Vitaly RSO design tokens (Figma: OpenLine-Vitaly)
@@ -453,6 +454,271 @@ function StatusBadge({ children }) {
   );
 }
 
+/* ---- Linked records: documents (full screen) and ZIBs (drawer) ----------
+   Per the Figma "BGZ/encounter" spec, an info row that leads to a *document*
+   shows the filled document icon and opens it full screen; one that leads to
+   another *ZIB* shows the link icon and opens that BGZ in a right-hand drawer. */
+
+const ViewerContext = createContext({ openDocument: () => {}, openZib: () => {} });
+
+const PATIENT = { first: "Leroy Matt", last: "EVANS", id: "161 885 4347", dob: "16.08.2024", sex: "Male" };
+
+// Filled document glyph from the Figma "Icons/Small / document".
+function DocumentIcon({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 2.5h8.2L19.5 8v12.2a1.3 1.3 0 0 1-1.3 1.3H6a1.3 1.3 0 0 1-1.3-1.3V3.8A1.3 1.3 0 0 1 6 2.5Z" fill={T.primary} />
+      <path d="M14 2.5V8h5.5" fill="#fff" fillOpacity="0.35" />
+      <path d="M8 12.5h8M8 15.5h8M8 18.5h5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DocLink({ doc, label = "Open document" }) {
+  const { openDocument } = useContext(ViewerContext);
+  return (
+    <button onClick={() => openDocument(doc)} aria-label={label} title={label} className="inline-flex items-center rounded hover:bg-black/[0.06] p-0.5 -m-0.5">
+      <DocumentIcon />
+    </button>
+  );
+}
+
+function ZibLink({ zib, label }) {
+  const { openZib } = useContext(ViewerContext);
+  return (
+    <button onClick={() => openZib(zib)} aria-label={label} title={label} className="inline-flex items-center rounded hover:bg-black/[0.06] p-0.5 -m-0.5">
+      <ExternalLink size={14} strokeWidth={2.4} style={{ color: T.primary }} />
+    </button>
+  );
+}
+
+// Deterministic guid-looking file name, like the real viewer shows.
+function pseudoGuid(seed) {
+  let h = 2166136261;
+  const out = [];
+  for (let i = 0; i < 32; i++) {
+    h = Math.imul(h ^ (seed.charCodeAt(i % seed.length) + i), 16777619) >>> 0;
+    out.push((h >>> 28).toString(16));
+  }
+  const s = out.join("");
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20, 32)}`;
+}
+
+// Card headers show organisations in caps; documents/ZIBs use the proper name.
+function properOrgName(org) {
+  const known = SOURCE_CONFIG.find((s) => s.name.toUpperCase() === org.toUpperCase());
+  if (known) return known.name;
+  return org === org.toUpperCase() ? org.charAt(0) + org.slice(1).toLowerCase() : org;
+}
+
+// Builds the content of a mock clinical document from a few summary rows.
+function buildDocument({ title, type, org: rawOrg, date, careProvider, summary }) {
+  const org = properOrgName(rawOrg);
+  const guid = pseudoGuid(`${title}${org}${date}`);
+  return {
+    title: `${title} (${date})`,
+    filename: guid,
+    sections: [
+      { heading: "Document", rows: [["Id", guid], ["Type", type], ["Date", date], ["Organisation", org]] },
+      { heading: "Patient", rows: [["First name", PATIENT.first], ["Last name", PATIENT.last], ["ID", PATIENT.id], ["Sex", PATIENT.sex], ["Date of birth", PATIENT.dob]] },
+      ...(careProvider ? [{ heading: "Author", rows: [["Full name", careProvider], ["Organisation", org]] }] : []),
+    ],
+    summaryHeading: type,
+    summary: summary.filter(([, v]) => v),
+  };
+}
+
+function encounterDocument(detail) {
+  return buildDocument({
+    title: detail.problem || "Encounter report",
+    type: "Encounter report",
+    org: detail.org,
+    date: detail.date,
+    careProvider: detail.careProvider && detail.careProvider !== "/" ? detail.careProvider : null,
+    summary: [
+      ["Problem", detail.problem],
+      ["Vital signs", detail.vitals],
+      ["Outcome", detail.outcome && detail.outcome !== "/" ? detail.outcome : null],
+      ["Additional info", detail.additional1 && !["/", "—"].includes(detail.additional1) ? detail.additional1 : null],
+      ["Status", detail.status],
+    ],
+  });
+}
+
+// Reads the structured values out of the "BP 140/85, weight 81 kg" strings.
+function vitalsZib(detail) {
+  const bp = detail.vitals.match(/BP\s*(\d+)\s*\/\s*(\d+)/);
+  const kg = detail.vitals.match(/weight\s*(\d+(?:\.\d+)?)\s*kg/i);
+  const org = properOrgName(detail.org);
+  return {
+    title: "Vital signs",
+    org,
+    date: detail.date,
+    rows: [
+      ["Systolic blood pressure", bp ? `${bp[1]} mmHg` : null],
+      ["Diastolic blood pressure", bp ? `${bp[2]} mmHg` : null],
+      ["Body weight", kg ? `${kg[1]} kg` : null],
+      ["Measurement date", detail.date],
+      ["Measured by", detail.careProvider && detail.careProvider !== "/" ? detail.careProvider : null],
+      ["Source", detail.org],
+    ].filter(([, v]) => v),
+    status: detail.status,
+    conflict: detail.vitalsConflict || null,
+  };
+}
+
+// Full-screen document viewer (dark header + toolbar + white page).
+function DocumentViewer({ doc, onClose }) {
+  const [zoom, setZoom] = useState(100);
+  const step = (d) => setZoom((z) => Math.min(200, Math.max(50, z + d)));
+  return (
+    <motion.div
+      className="fixed inset-0 z-[70] flex flex-col"
+      style={{ backgroundColor: "#2b2b2b", fontFamily: T.fontFamily }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+      role="dialog"
+      aria-label={doc.title}
+    >
+      <div className="relative flex items-center justify-between px-5 h-[46px] shrink-0 text-white" style={{ backgroundColor: T.secondary }}>
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ backgroundColor: "#DCEEF3" }}>
+            <User size={16} style={{ color: T.primary }} />
+          </span>
+          <div className="leading-tight">
+            <div className="text-[12px] font-bold">{PATIENT.last}, {PATIENT.first}</div>
+            <div className="text-[11px] opacity-80">ID {PATIENT.id} · {PATIENT.dob}</div>
+          </div>
+        </div>
+        <div className="absolute left-1/2 -translate-x-1/2 text-[18px] font-semibold tracking-wide whitespace-nowrap">{doc.title}</div>
+        <div className="flex items-center gap-4">
+          <button aria-label="Download" title="Download"><Download size={18} /></button>
+          <button onClick={onClose} aria-label="Exit full screen" title="Exit full screen"><Minimize2 size={18} /></button>
+          <button onClick={onClose} aria-label="Close document" title="Close"><X size={20} /></button>
+        </div>
+      </div>
+
+      <div className="relative flex items-center h-[42px] shrink-0 px-5 text-white text-[13px]" style={{ backgroundColor: "#3c3c3c" }}>
+        <Menu size={16} />
+        <span className="ml-5 font-semibold">{doc.filename}</span>
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-3">
+          <span className="px-2 py-0.5 rounded bg-black/60">1</span><span>/ 1</span>
+          <span className="w-px h-4 bg-white/30" />
+          <button onClick={() => step(-25)} aria-label="Zoom out"><Minus size={14} /></button>
+          <span className="px-2 py-0.5 rounded bg-black/60 tabular-nums">{zoom}%</span>
+          <button onClick={() => step(25)} aria-label="Zoom in"><Plus size={14} /></button>
+        </div>
+        <div className="ml-auto flex items-center gap-4">
+          <Download size={16} /><Printer size={16} /><MoreVertical size={16} />
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto flex justify-center py-5">
+        <div className="bg-white shadow-xl origin-top shrink-0 mb-6" style={{ width: 585, minHeight: 760, padding: "28px 28px 40px", zoom: zoom / 100, color: T.bodyText }}>
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="text-[22px] font-bold leading-tight">{PATIENT.last}, {PATIENT.first}</div>
+              <div className="text-[9px] mt-0.5" style={{ color: T.gray600 }}>
+                <b>ID:</b> {PATIENT.id} &nbsp; <b>Date of birth</b> {PATIENT.dob} &nbsp; <b>Sex</b> {PATIENT.sex}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <svg width="24" height="24" viewBox="0 0 32 32" fill="#17A3C6"><path d="M4 1H28L21 9H11L4 1Z" /><path d="M31 4V28L23 21V11L31 4Z" /><path d="M28 31H4L11 23H21L28 31Z" /><path d="M1 4L9 11V21L1 28V4Z" /></svg>
+              <span className="text-[15px] font-bold tracking-[0.18em]" style={{ color: T.gray700 }}>VITALY</span>
+            </div>
+          </div>
+          <div className="h-[3px] mt-2.5 mb-6 rounded" style={{ backgroundColor: T.gray400 }} />
+
+          {doc.sections.map((s) => (
+            <div key={s.heading} className="grid grid-cols-[150px_1fr] mb-5">
+              <div className="text-[13px] font-semibold">{s.heading}</div>
+              <div className="flex flex-col gap-2.5">
+                {s.rows.map(([k, v]) => (
+                  <div key={k} className="grid grid-cols-[1fr_1.3fr] gap-3 text-[10.5px] leading-snug">
+                    <span className="font-bold">{k}</span>
+                    <span style={{ color: T.gray600 }} className="break-all">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <div className="text-[18px] font-semibold mt-8 pb-1 border-b" style={{ borderColor: T.gray600 }}>{doc.summaryHeading}</div>
+          <div className="flex flex-col gap-2.5 mt-4">
+            {doc.summary.map(([k, v]) => (
+              <div key={k} className="grid grid-cols-[150px_1fr] gap-3 text-[10.5px] leading-snug">
+                <span className="font-bold">{k}</span>
+                <span style={{ color: T.gray600 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// Right-hand drawer showing a linked BGZ (ZIB).
+function ZibDrawer({ zib, onClose }) {
+  return (
+    <>
+      <motion.div
+        className="fixed inset-0 bg-black/30 z-40"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={onClose}
+      />
+      <motion.div
+        className="fixed top-0 right-0 h-full w-[383px] max-w-[92vw] bg-white z-50 shadow-2xl flex flex-col"
+        style={{ fontFamily: T.fontFamily, color: T.bodyText }}
+        initial={{ x: "100%" }}
+        animate={{ x: 0 }}
+        exit={{ x: "100%" }}
+        transition={{ type: "spring", stiffness: 380, damping: 38 }}
+        role="dialog"
+        aria-label={`${zib.title} (ZIB)`}
+      >
+        <div className="flex items-center justify-between px-4 h-[72px] shrink-0">
+          <span className="text-[13px] font-bold tracking-wide uppercase">{zib.title}</span>
+          <button onClick={onClose} aria-label="Close"><X size={24} style={{ color: T.primary }} /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 pb-6">
+          <div className="rounded-md p-4" style={{ backgroundColor: T.light }}>
+            <div className="flex items-baseline justify-between gap-3 mb-3">
+              <span className="text-[12px] font-bold tracking-wide">{zib.org.toUpperCase()}</span>
+              <span className="text-[14px]" style={{ color: T.gray600 }}>{zib.date}</span>
+            </div>
+            <div className="flex flex-col gap-3 text-[14px]">
+              {zib.rows.map(([k, v]) => (
+                <div key={k}>
+                  <div className="font-semibold" style={{ color: T.gray600 }}>{k}</div>
+                  <div>{v}</div>
+                </div>
+              ))}
+              <div>
+                <div className="font-semibold mb-0.5" style={{ color: T.gray600 }}>Status</div>
+                <StatusBadge>{zib.status}</StatusBadge>
+              </div>
+            </div>
+          </div>
+          {zib.conflict && (
+            <div className="mt-4 rounded-md px-4 py-3 border text-[13px]" style={{ borderColor: T.warning, backgroundColor: "#FFF6E8" }}>
+              <div className="flex items-center gap-1.5 font-semibold mb-1">
+                <AlertCircle size={15} style={{ color: T.warning, fill: T.warning, stroke: "#fff" }} /> Values differ between sources
+              </div>
+              {zib.conflict.map((c, i) => <div key={i}>{c.org}: {c.value}</div>)}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </>
+  );
+}
+
 // One organization's contribution to an (expanded) encounter card. Merged
 // encounters render one of these per contributing source.
 function OrgDetailBlock({ detail, isFirst }) {
@@ -464,13 +730,13 @@ function OrgDetailBlock({ detail, isFirst }) {
       </div>
       <DetailRow label="Problem">
         {detail.problem}
-        {detail.problem && <ExternalLink size={13} style={{ color: T.primary }} />}
+        {detail.problem && <DocLink doc={encounterDocument(detail)} />}
       </DetailRow>
       <DetailRow label="Vital signs">
         {detail.vitals && (
           <>
             {detail.vitals}
-            <ExternalLink size={13} style={{ color: T.primary }} />
+            <ZibLink zib={vitalsZib(detail)} label="Open Vital signs (ZIB)" />
             {detail.vitalsConflict && <VitalsWarning comparisons={detail.vitalsConflict} />}
           </>
         )}
@@ -488,13 +754,29 @@ function OrgDetailBlock({ detail, isFirst }) {
   );
 }
 
-function DiagnosisDetailBlock({ detail }) {
+function DiagnosisDetailBlock({ detail, title }) {
+  const doc = buildDocument({
+    title,
+    type: "Diagnosis report",
+    org: detail.org,
+    date: detail.date,
+    summary: [
+      ["Explanation", detail.explanation],
+      ["Anatom. location", detail.location],
+      ["Laterality", detail.laterality],
+      ["Verification status", detail.verificationStatus],
+      ["Status", detail.status],
+    ],
+  });
   return (
     <div className="px-4 py-3" style={{ backgroundColor: T.light }}>
       <div className="mb-2">
         <span className="text-[12px] font-bold tracking-wide" style={{ color: T.bodyText }}>{detail.org}</span>
       </div>
-      <DetailRow label="Explanation">{detail.explanation}</DetailRow>
+      <DetailRow label="Explanation">
+        {detail.explanation}
+        <DocLink doc={doc} />
+      </DetailRow>
       <DetailRow label="Anatom. location">{detail.location}</DetailRow>
       <DetailRow label="Laterality">{detail.laterality}</DetailRow>
       <DetailRow label="Verification status">{detail.verificationStatus}</DetailRow>
@@ -507,10 +789,25 @@ function DiagnosisDetailBlock({ detail }) {
   );
 }
 
-function RestrictionDetailBlock({ detail }) {
+function RestrictionDetailBlock({ detail, title, org, date }) {
+  const doc = buildDocument({
+    title,
+    type: "Treatment restriction",
+    org,
+    date,
+    careProvider: detail.verifiedBy,
+    summary: [
+      ["Limits", detail.limits],
+      ["Verified by", detail.verifiedBy],
+      ["Verification date", detail.verificationDate],
+    ],
+  });
   return (
     <div className="px-4 py-3" style={{ backgroundColor: T.light }}>
-      <DetailRow label="Limits">{detail.limits}</DetailRow>
+      <DetailRow label="Limits">
+        {detail.limits}
+        <DocLink doc={doc} />
+      </DetailRow>
       <DetailRow label="Verified By">{detail.verifiedBy}</DetailRow>
       <DetailRow label="Verification date">{detail.verificationDate}</DetailRow>
     </div>
@@ -797,6 +1094,20 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
   const [queuedItems, setQueuedItems] = useState(null);
   const [sourcesOpen, setSourcesOpen] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
+  // Linked record currently open: a full-screen document or a ZIB drawer.
+  const [viewer, setViewer] = useState(null);
+  const viewerApi = useRef({
+    openDocument: (doc) => setViewer({ type: "document", doc }),
+    openZib: (zib) => setViewer({ type: "zib", zib }),
+  }).current;
+  useEffect(() => {
+    if (!viewer) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setViewer(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [viewer]);
   const [expandedIds, setExpandedIds] = useState({});
   const toggleExpand = (id) => setExpandedIds((prev) => ({ ...prev, [id]: !prev[id] }));
   // Which left-rail category's content shows in the right column. All three
@@ -1056,7 +1367,7 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
   }, 0);
 
   return (
-    <>
+    <ViewerContext.Provider value={viewerApi}>
     <div className="grid grid-cols-[300px_1fr] gap-10">
       <div className="flex flex-col self-start sticky top-6">
         <button
@@ -1319,7 +1630,7 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
                           exit={{ height: 0, opacity: 0 }}
                           transition={{ duration: 0.25, ease: "easeInOut" }}
                         >
-                          <DiagnosisDetailBlock detail={item.detail} />
+                          <DiagnosisDetailBlock detail={item.detail} title={item.label.split("|")[1].trim()} />
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -1399,7 +1710,7 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
                           exit={{ height: 0, opacity: 0 }}
                           transition={{ duration: 0.25, ease: "easeInOut" }}
                         >
-                          <RestrictionDetailBlock detail={item.detail} />
+                          <RestrictionDetailBlock detail={item.detail} title={item.label.split("|")[1].trim()} org={item.source} date={item.date} />
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -1543,7 +1854,15 @@ function EncountersSection({ scrollRef, sourceFilter, timeFilter }) {
       </AnimatePresence>,
       document.body
     )}
-    </>
+
+    {typeof document !== "undefined" && createPortal(
+      <AnimatePresence>
+        {viewer?.type === "zib" && <ZibDrawer key="zib" zib={viewer.zib} onClose={() => setViewer(null)} />}
+        {viewer?.type === "document" && <DocumentViewer key="doc" doc={viewer.doc} onClose={() => setViewer(null)} />}
+      </AnimatePresence>,
+      document.body
+    )}
+    </ViewerContext.Provider>
   );
 }
 
